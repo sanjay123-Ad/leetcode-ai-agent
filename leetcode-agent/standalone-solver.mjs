@@ -55,7 +55,7 @@ async function fetchDailyChallenge() {
 
 async function callGemini(prompt) {
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -91,9 +91,11 @@ Analysis: ${JSON.stringify(analysis)}`;
 
 async function testCode(problemText, code, attempt) {
   console.log(`🧪 Writing and running tests (attempt ${attempt})...`);
-  const testPrompt = `Write a complete, runnable Java class named "Main" that includes this solution and tests it with at least 5 test cases.
-Print ALL_TESTS_PASSED if all pass, or TEST_FAILED with details if any fail.
-Return ONLY Java code, no markdown.
+  const testPrompt = `Write a clean, minimal, runnable Java class named "Main" that tests the following solution against 3 key test cases.
+Do NOT use external libraries. Use standard System.out.println.
+If all test cases pass, print EXACTLY "ALL_TESTS_PASSED".
+If any test case fails, print EXACTLY "TEST_FAILED".
+Return ONLY raw Java code inside class Main, no markdown, no comments.
 
 Problem: ${problemText}
 Solution: ${code}`;
