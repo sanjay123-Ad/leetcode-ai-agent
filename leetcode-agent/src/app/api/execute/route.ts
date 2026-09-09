@@ -39,7 +39,7 @@ ${code}
         'X-Title': 'LeetCode AI Agent',
       },
       body: JSON.stringify({
-        model: 'qwen/qwen-2.5-coder-32b-instruct:free',
+        model: 'deepseek/deepseek-r1:free',
         messages: [{ role: 'user', content: prompt }],
       }),
     });
