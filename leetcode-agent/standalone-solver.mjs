@@ -27,7 +27,7 @@ function stripHtml(html) {
 
 async function callOpenRouter(prompt, jsonMode = false) {
   const body = {
-    model: 'deepseek/deepseek-r1:free',
+    model: 'google/gemini-2.0-flash-exp:free',
     messages: [{ role: 'user', content: prompt }],
   };
 

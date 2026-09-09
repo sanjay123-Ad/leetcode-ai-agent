@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase';
 async function callOpenRouter(prompt: string, jsonMode = false) {
   const apiKey = process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY;
   const body: any = {
-    model: 'deepseek/deepseek-r1:free',
+    model: 'google/gemini-2.0-flash-exp:free',
     messages: [{ role: 'user', content: prompt }],
   };
 
