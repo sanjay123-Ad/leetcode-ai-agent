@@ -35,7 +35,7 @@ ${JSON.stringify(analysis, null, 2)}
         'X-Title': 'LeetCode AI Agent',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.0-flash-001',
+        model: 'meta-llama/llama-3.3-70b-instruct:free',
         messages: [{ role: 'user', content: prompt }],
       }),
     });

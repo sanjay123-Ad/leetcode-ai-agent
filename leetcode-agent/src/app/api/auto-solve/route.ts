@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase';
 async function callOpenRouter(prompt: string, jsonMode = false) {
   const apiKey = process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY;
   const body: any = {
-    model: 'google/gemini-2.0-flash-001',
+    model: 'meta-llama/llama-3.3-70b-instruct:free',
     messages: [{ role: 'user', content: prompt }],
   };
 

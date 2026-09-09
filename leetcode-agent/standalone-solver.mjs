@@ -27,7 +27,7 @@ function stripHtml(html) {
 
 async function callOpenRouter(prompt, jsonMode = false) {
   const body = {
-    model: 'google/gemini-2.0-flash-001',
+    model: 'meta-llama/llama-3.3-70b-instruct:free',
     messages: [{ role: 'user', content: prompt }],
   };
 
