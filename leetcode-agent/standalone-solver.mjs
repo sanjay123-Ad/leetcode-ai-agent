@@ -234,6 +234,16 @@ async function main() {
     }
   }
 
+  // Clean up code formatting for storage
+  code = (code || '')
+    .replace(/```java/gi, '')
+    .replace(/```/g, '')
+    .trim();
+
+  if (!code) {
+    code = `// Could not generate code for ${challenge.title}`;
+  }
+
   // Save to Supabase
   console.log('\n💾 Saving to database...');
   const { error } = await supabase.from('problem_history').insert([{
