@@ -1,0 +1,193 @@
+// standalone-solver.mjs
+// This script is run by GitHub Actions every day.
+// It does NOT need the Next.js server to be running.
+// It calls the AI APIs directly.
+
+import { createClient } from '@supabase/supabase-js';
+
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const JUDGE0_API_KEY = process.env.JUDGE0_API_KEY;
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+function stripHtml(html) {
+  return html
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+async function fetchDailyChallenge() {
+  console.log('📥 Fetching daily challenge...');
+  const apis = [
+    'https://alfa-leetcode-api.onrender.com/daily',
+    'https://leetcode-api-fasz.vercel.app/dailyQuestion',
+  ];
+
+  for (const url of apis) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const data = await res.json();
+      const title = data.questionTitle || data.title;
+      if (!title) continue;
+      return {
+        date: data.date || new Date().toISOString().split('T')[0],
+        link: data.questionLink || `https://leetcode.com/problems/${data.titleSlug}/`,
+        title,
+        titleSlug: data.titleSlug,
+        difficulty: data.difficulty,
+        content: stripHtml(data.question || data.content || ''),
+        tags: data.topicTags?.map(t => t.name) || [],
+      };
+    } catch { continue; }
+  }
+  throw new Error('All LeetCode API sources failed');
+}
+
+async function callGemini(prompt) {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+    }
+  );
+  const data = await res.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+}
+
+async function analyzeAndGenerate(problemText) {
+  console.log('🧠 AI analyzing problem...');
+  const analysisPrompt = `Analyze this LeetCode problem and return ONLY a JSON object:
+{"task":"brief summary","expectedTimeComplexity":"O(...)","expectedSpaceComplexity":"O(...)","edgeCases":["case1"],"insights":["insight1"]}
+
+Problem: ${problemText}`;
+
+  const analysisText = await callGemini(analysisPrompt);
+  const jsonMatch = analysisText.match(/\{[\s\S]*\}/);
+  const analysis = JSON.parse(jsonMatch?.[0] || '{}');
+
+  console.log('💻 Generating Java code...');
+  const codePrompt = `Write an optimal Java solution for this LeetCode problem. Return ONLY the Java code, no markdown, no explanation.
+
+Problem: ${problemText}
+Analysis: ${JSON.stringify(analysis)}`;
+
+  let code = await callGemini(codePrompt);
+  code = code.replace(/^```java\n?/m, '').replace(/^```\n?/m, '').replace(/```$/m, '').trim();
+
+  return { analysis, code };
+}
+
+async function testCode(problemText, code, attempt) {
+  console.log(`🧪 Writing and running tests (attempt ${attempt})...`);
+  const testPrompt = `Write a complete, runnable Java class named "Main" that includes this solution and tests it with at least 5 test cases.
+Print ALL_TESTS_PASSED if all pass, or TEST_FAILED with details if any fail.
+Return ONLY Java code, no markdown.
+
+Problem: ${problemText}
+Solution: ${code}`;
+
+  let testCode = await callGemini(testPrompt);
+  testCode = testCode.replace(/^```java\n?/m, '').replace(/^```\n?/m, '').replace(/```$/m, '').trim();
+
+  const judge0Res = await fetch(
+    'https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&wait=true',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-RapidAPI-Key': JUDGE0_API_KEY,
+        'X-RapidAPI-Host': 'judge0-ce.p.rapidapi.com',
+      },
+      body: JSON.stringify({ language_id: 62, source_code: testCode }),
+    }
+  );
+
+  const result = await judge0Res.json();
+  const stdout = result.stdout || '';
+  const passed = stdout.includes('ALL_TESTS_PASSED') && result.status?.id === 3;
+  return { passed, stdout, stderr: result.stderr || '', compile_output: result.compile_output || '', result };
+}
+
+async function debugCode(problemText, code, error) {
+  console.log('🔧 AI debugging code...');
+  const debugPrompt = `Fix this Java solution for the LeetCode problem. The tests failed with this error:
+${error}
+
+Problem: ${problemText}
+Buggy code: ${code}
+
+Return ONLY the fixed Java code, no markdown.`;
+
+  let fixed = await callGemini(debugPrompt);
+  fixed = fixed.replace(/^```java\n?/m, '').replace(/^```\n?/m, '').replace(/```$/m, '').trim();
+  return fixed;
+}
+
+async function main() {
+  console.log('\n🤖 AI LeetCode Agent starting...\n');
+
+  const challenge = await fetchDailyChallenge();
+  console.log(`📌 Today's problem: ${challenge.title} (${challenge.difficulty})\n`);
+
+  const { analysis, code: initialCode } = await analyzeAndGenerate(challenge.content);
+  let code = initialCode;
+  let allPassed = false;
+  let finalAttempt = 1;
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const { passed, stdout, stderr, compile_output } = await testCode(challenge.content, code, attempt);
+
+    if (passed) {
+      allPassed = true;
+      finalAttempt = attempt;
+      console.log(`\n✅ ALL TESTS PASSED on attempt ${attempt}!`);
+      break;
+    }
+
+    console.log(`❌ Tests failed on attempt ${attempt}`);
+    if (attempt < 3) {
+      const errorInfo = `stdout: ${stdout}\nstderr: ${stderr}\ncompiler: ${compile_output}`;
+      code = await debugCode(challenge.content, code, errorInfo);
+    } else {
+      finalAttempt = attempt;
+    }
+  }
+
+  // Save to Supabase
+  console.log('\n💾 Saving to database...');
+  const { error } = await supabase.from('problem_history').insert([{
+    title: challenge.title,
+    difficulty: challenge.difficulty,
+    code,
+    attempts: finalAttempt,
+    passed: allPassed,
+  }]);
+
+  if (error) console.error('⚠️  Supabase error:', error.message);
+  else console.log('✅ Saved to Supabase!');
+
+  console.log('\n==============================================');
+  console.log(`📊 FINAL RESULT`);
+  console.log(`Problem  : ${challenge.title}`);
+  console.log(`Difficulty: ${challenge.difficulty}`);
+  console.log(`Status   : ${allPassed ? '✅ PASSED' : '❌ FAILED after 3 attempts'}`);
+  console.log(`Attempts : ${finalAttempt}`);
+  console.log('==============================================\n');
+}
+
+main().catch(err => {
+  console.error('💥 Fatal error:', err.message);
+  process.exit(1);
+});

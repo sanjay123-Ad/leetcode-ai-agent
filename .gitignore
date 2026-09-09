@@ -1,0 +1,15 @@
+# Root .gitignore
+.npm-cache/
+node_modules/
+
+# Env files - NEVER commit secrets!
+.env
+.env.local
+.env*.local
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Batch files with secrets (optional)
+run-daily-agent.bat
