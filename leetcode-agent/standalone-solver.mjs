@@ -119,7 +119,7 @@ async function fetchDailyChallenge() {
 
 async function callGemini(prompt) {
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -143,16 +143,16 @@ Problem: ${problemText}`;
 
   console.log('💻 Generating Java code...');
   const codePrompt = `Write an optimal LeetCode Java solution for this problem.
-Important Rules:
-1. Provide ONLY a standard "class Solution" containing the required method.
-2. Do NOT include a Main class or system output.
-3. Do NOT include markdown text outside code blocks.
+Requirements:
+1. Provide ONLY the Java code (class Solution). Do NOT include markdown formatting or explanations.
+2. Make the code clean, optimal, and complete.
 
 Problem: ${problemText}
 Analysis: ${JSON.stringify(analysis)}`;
 
   let code = await callGemini(codePrompt);
-  code = code.replace(/^```java\n?/m, '').replace(/^```\n?/m, '').replace(/```$/m, '').trim();
+  // Clean markdown fences robustly
+  code = code.replace(/```java/gi, '').replace(/```/g, '').trim();
 
   return { analysis, code };
 }
@@ -200,7 +200,7 @@ Current Code: ${code}
 Return ONLY the corrected "class Solution" code. No extra text or main methods.`;
 
   let fixed = await callGemini(debugPrompt);
-  fixed = fixed.replace(/^```java\n?/m, '').replace(/^```\n?/m, '').replace(/```$/m, '').trim();
+  fixed = fixed.replace(/```java/gi, '').replace(/```/g, '').trim();
   return fixed;
 }
 
