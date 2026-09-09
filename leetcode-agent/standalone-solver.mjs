@@ -5,7 +5,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY;
 const JUDGE0_API_KEY = process.env.JUDGE0_API_KEY;
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -23,6 +23,35 @@ function stripHtml(html) {
     .replace(/&#39;/g, "'")
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+async function callOpenRouter(prompt, jsonMode = false) {
+  const body = {
+    model: 'google/gemini-2.5-flash:free',
+    messages: [{ role: 'user', content: prompt }],
+  };
+
+  if (jsonMode) {
+    body.response_format = { type: 'json_object' };
+  }
+
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://github.com/sanjay123-Ad/leetcode-ai-agent',
+      'X-Title': 'LeetCode AI Agent',
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await res.json();
+  const text = data.choices?.[0]?.message?.content;
+  if (!text) {
+    throw new Error(data.error?.message || 'OpenRouter API call failed');
+  }
+  return text;
 }
 
 async function fetchDailyChallenge() {
@@ -117,19 +146,6 @@ async function fetchDailyChallenge() {
   throw new Error('All 3 LeetCode API sources failed to fetch daily challenge');
 }
 
-async function callGemini(prompt) {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-    }
-  );
-  const data = await res.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-}
-
 async function analyzeAndGenerate(problemText) {
   console.log('🧠 AI analyzing problem...');
   const analysisPrompt = `Analyze this LeetCode problem and return ONLY a JSON object:
@@ -137,7 +153,7 @@ async function analyzeAndGenerate(problemText) {
 
 Problem: ${problemText}`;
 
-  const analysisText = await callGemini(analysisPrompt);
+  const analysisText = await callOpenRouter(analysisPrompt, true);
   const jsonMatch = analysisText.match(/\{[\s\S]*\}/);
   let analysis;
   try {
@@ -156,7 +172,7 @@ Requirements:
 Problem: ${problemText}
 Analysis: ${JSON.stringify(analysis)}`;
 
-  let code = await callGemini(codePrompt);
+  let code = await callOpenRouter(codePrompt);
   // Clean markdown fences robustly
   code = code.replace(/```java/gi, '').replace(/```/g, '').trim();
 
@@ -173,8 +189,8 @@ Problem: ${problemText}
 Solution:
 ${code}`;
 
-  let testCode = await callGemini(testPrompt);
-  testCode = testCode.replace(/^```java\n?/m, '').replace(/^```\n?/m, '').replace(/```$/m, '').trim();
+  let testCode = await callOpenRouter(testPrompt);
+  testCode = testCode.replace(/```java/gi, '').replace(/```/g, '').trim();
 
   const judge0Res = await fetch(
     'https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&wait=true',
@@ -205,7 +221,7 @@ Current Code: ${code}
 
 Return ONLY the corrected "class Solution" code. No extra text or main methods.`;
 
-  let fixed = await callGemini(debugPrompt);
+  let fixed = await callOpenRouter(debugPrompt);
   fixed = fixed.replace(/```java/gi, '').replace(/```/g, '').trim();
   return fixed;
 }

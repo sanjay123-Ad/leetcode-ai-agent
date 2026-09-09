@@ -1,7 +1,4 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenAI } from '@google/genai';
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export async function POST(req: Request) {
   try {
@@ -27,22 +24,32 @@ Problem Description:
 ${problemText}
     `;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-      }
+    const apiKey = process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY;
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://github.com/sanjay123-Ad/leetcode-ai-agent',
+        'X-Title': 'LeetCode AI Agent',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash:free',
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' },
+      }),
     });
 
-    const text = response.text;
+    const data = await res.json();
+    const text = data.choices?.[0]?.message?.content;
     if (!text) {
-      throw new Error("No response from Gemini");
+      throw new Error(data.error?.message || 'No response from OpenRouter');
     }
 
-    const data = JSON.parse(text);
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    const parsedData = JSON.parse(jsonMatch?.[0] || text);
 
-    return NextResponse.json({ success: true, data });
+    return NextResponse.json({ success: true, data: parsedData });
   } catch (error: any) {
     console.error('Error analyzing problem:', error);
     return NextResponse.json({ success: false, error: error.message || 'Failed to analyze' }, { status: 500 });

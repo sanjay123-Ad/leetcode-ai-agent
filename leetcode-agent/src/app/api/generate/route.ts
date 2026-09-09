@@ -1,7 +1,4 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenAI } from '@google/genai';
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export async function POST(req: Request) {
   try {
@@ -17,8 +14,8 @@ I will provide you with a LeetCode problem description and an analysis of the pr
 Your task is to write the optimal Java solution based on the analysis provided.
 
 Requirements:
-1. Provide ONLY the Java code. Do not include any explanations, markdown code blocks, or conversational text.
-2. The code should be a single Java class (typically named Solution) with the main method for the problem.
+1. Provide ONLY the Java code (class Solution). Do NOT include any explanations, markdown code blocks, or conversational text.
+2. The code should be a single Java class named Solution with the method for the problem.
 3. Make the code clean, well-commented, and optimal.
 
 Problem Description:
@@ -28,20 +25,30 @@ Problem Analysis:
 ${JSON.stringify(analysis, null, 2)}
     `;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
+    const apiKey = process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY;
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://github.com/sanjay123-Ad/leetcode-ai-agent',
+        'X-Title': 'LeetCode AI Agent',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash:free',
+        messages: [{ role: 'user', content: prompt }],
+      }),
     });
 
-    let code = response.text;
+    const data = await res.json();
+    let code = data.choices?.[0]?.message?.content;
     if (!code) {
-      throw new Error("No response from Gemini");
+      throw new Error(data.error?.message || 'No response from OpenRouter');
     }
 
-    // Clean up any potential markdown code blocks if the AI accidentally includes them
     code = code.replace(/```java/gi, '').replace(/```/g, '').trim();
 
-    return NextResponse.json({ success: true, data: { code: code.trim() } });
+    return NextResponse.json({ success: true, data: { code } });
   } catch (error: any) {
     console.error('Error generating code:', error);
     return NextResponse.json({ success: false, error: error.message || 'Failed to generate code' }, { status: 500 });
