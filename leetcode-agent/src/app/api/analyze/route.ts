@@ -34,7 +34,7 @@ ${problemText}
         'X-Title': 'LeetCode AI Agent',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash:free',
+        model: 'google/gemini-2.0-flash-001',
         messages: [{ role: 'user', content: prompt }],
         response_format: { type: 'json_object' },
       }),
