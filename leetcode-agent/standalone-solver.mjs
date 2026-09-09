@@ -139,7 +139,13 @@ Problem: ${problemText}`;
 
   const analysisText = await callGemini(analysisPrompt);
   const jsonMatch = analysisText.match(/\{[\s\S]*\}/);
-  const analysis = JSON.parse(jsonMatch?.[0] || '{}');
+  let analysis;
+  try {
+    analysis = JSON.parse(jsonMatch?.[0] || '{}');
+  } catch {
+    console.log('⚠️ Could not parse analysis JSON, continuing with empty analysis');
+    analysis = {};
+  }
 
   console.log('💻 Generating Java code...');
   const codePrompt = `Write an optimal LeetCode Java solution for this problem.

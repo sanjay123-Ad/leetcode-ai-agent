@@ -33,7 +33,7 @@ ${code}
     `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.1-pro-preview',
+      model: 'gemini-2.5-flash',
       contents: prompt,
     });
 
@@ -42,7 +42,7 @@ ${code}
       throw new Error("No response from Gemini");
     }
 
-    testCode = testCode.replace(/^```java\n/m, '').replace(/^```\n?/m, '').replace(/```$/m, '');
+    testCode = testCode.replace(/```java/gi, '').replace(/```/g, '').trim();
 
     // Now execute it via Judge0
     const judge0Response = await fetch('https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&wait=true', {

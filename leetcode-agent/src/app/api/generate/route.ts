@@ -29,7 +29,7 @@ ${JSON.stringify(analysis, null, 2)}
     `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.1-pro-preview',
+      model: 'gemini-2.5-flash',
       contents: prompt,
     });
 
@@ -39,7 +39,7 @@ ${JSON.stringify(analysis, null, 2)}
     }
 
     // Clean up any potential markdown code blocks if the AI accidentally includes them
-    code = code.replace(/^```java\n/m, '').replace(/^```\n?/m, '').replace(/```$/m, '');
+    code = code.replace(/```java/gi, '').replace(/```/g, '').trim();
 
     return NextResponse.json({ success: true, data: { code: code.trim() } });
   } catch (error: any) {

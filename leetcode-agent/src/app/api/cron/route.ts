@@ -10,7 +10,9 @@ export async function GET(req: Request) {
   }
 
   try {
-    const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000';
+    const baseUrl =
+      process.env.NEXTAUTH_URL ||
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
 
     // Step 1: Fetch today's challenge
     const challengeRes = await fetch(`${baseUrl}/api/daily-challenge`);

@@ -53,14 +53,14 @@ ${JSON.stringify(analysis, null, 2)}
   `;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-3.1-pro-preview',
+    model: 'gemini-2.5-flash',
     contents: prompt,
   });
 
   let code = response.text;
   if (!code) throw new Error('No code response from Gemini');
-  code = code.replace(/^```java\n/m, '').replace(/^```\n?/m, '').replace(/```$/m, '');
-  return code.trim();
+  code = code.replace(/```java/gi, '').replace(/```/g, '').trim();
+  return code;
 }
 
 // Helper: Generate test wrapper and execute via Judge0
@@ -87,13 +87,13 @@ ${code}
   `;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-3.1-pro-preview',
+    model: 'gemini-2.5-flash',
     contents: prompt,
   });
 
   let testCode = response.text;
   if (!testCode) throw new Error('No test code response from Gemini');
-  testCode = testCode.replace(/^```java\n/m, '').replace(/^```\n?/m, '').replace(/```$/m, '');
+  testCode = testCode.replace(/```java/gi, '').replace(/```/g, '').trim();
 
   // Execute via Judge0
   const judge0Response = await fetch('https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&wait=true', {
@@ -130,14 +130,14 @@ Please fix the code. Provide ONLY the fixed Java code. No explanations, no markd
   `;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-3.1-pro-preview',
+    model: 'gemini-2.5-flash',
     contents: prompt,
   });
 
   let fixedCode = response.text;
   if (!fixedCode) throw new Error('No debug response from Gemini');
-  fixedCode = fixedCode.replace(/^```java\n/m, '').replace(/^```\n?/m, '').replace(/```$/m, '');
-  return fixedCode.trim();
+  fixedCode = fixedCode.replace(/```java/gi, '').replace(/```/g, '').trim();
+  return fixedCode;
 }
 
 export async function POST(req: Request) {
