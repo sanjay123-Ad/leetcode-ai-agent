@@ -27,7 +27,7 @@ function stripHtml(html) {
 
 async function callOpenRouter(prompt, jsonMode = false) {
   const body = {
-    model: 'meta-llama/llama-3.3-70b-instruct:free',
+    model: 'qwen/qwen-2.5-coder-32b-instruct:free',
     messages: [{ role: 'user', content: prompt }],
   };
 

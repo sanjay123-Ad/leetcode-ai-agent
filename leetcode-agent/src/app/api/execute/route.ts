@@ -39,7 +39,7 @@ ${code}
         'X-Title': 'LeetCode AI Agent',
       },
       body: JSON.stringify({
-        model: 'meta-llama/llama-3.3-70b-instruct:free',
+        model: 'qwen/qwen-2.5-coder-32b-instruct:free',
         messages: [{ role: 'user', content: prompt }],
       }),
     });
