@@ -1,55 +1,38 @@
 import { NextResponse } from 'next/server';
+import { GoogleGenAI } from '@google/genai';
 import { supabase } from '@/lib/supabase';
 
-async function callOpenRouter(prompt: string, jsonMode = false) {
-  const apiKey = process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY;
-  const body: any = {
-    model: 'google/gemini-2.0-flash-exp:free',
-    messages: [{ role: 'user', content: prompt }],
-  };
-
-  if (jsonMode) {
-    body.response_format = { type: 'json_object' };
-  }
-
-  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://github.com/sanjay123-Ad/leetcode-ai-agent',
-      'X-Title': 'LeetCode AI Agent',
-    },
-    body: JSON.stringify(body),
-  });
-
-  const data = await res.json();
-  const text = data.choices?.[0]?.message?.content;
-  if (!text) {
-    throw new Error(data.error?.message || 'OpenRouter API call failed');
-  }
-  return text;
-}
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 // Helper: Analyze problem
 async function analyzeProblem(problemText: string) {
   const prompt = `
-You are an expert algorithm analyst. Analyze the following LeetCode problem.
-Extract the core task, the expected time and space complexity, and edge cases.
-Format the output as a strict JSON object with the following schema:
+Analyze this LeetCode problem.
+Extract core task, expected time and space complexity, and edge cases.
+Format as strict JSON:
 {
-  "task": "A brief summary of what needs to be done",
-  "expectedTimeComplexity": "e.g., O(n log n)",
-  "expectedSpaceComplexity": "e.g., O(1)",
-  "edgeCases": ["edge case 1", "edge case 2"],
-  "insights": ["insight 1", "insight 2"]
+  "task": "summary",
+  "expectedTimeComplexity": "O(...)",
+  "expectedSpaceComplexity": "O(...)",
+  "edgeCases": ["case1"],
+  "insights": ["insight1"]
 }
 
 Problem Description:
 ${problemText}
   `;
 
-  const text = await callOpenRouter(prompt, true);
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.0-flash',
+    contents: prompt,
+    config: {
+      responseMimeType: 'application/json',
+      maxOutputTokens: 500,
+    }
+  });
+
+  const text = response.text;
+  if (!text) throw new Error('No analysis response from Gemini');
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   return JSON.parse(jsonMatch?.[0] || text);
 }
@@ -57,17 +40,24 @@ ${problemText}
 // Helper: Generate Java code
 async function generateCode(problemText: string, analysis: any) {
   const prompt = `
-You are an expert Java developer and algorithm solver.
-Write the optimal Java solution (class Solution) for this LeetCode problem based on analysis.
+Write an optimal LeetCode Java solution (class Solution) for this problem.
 Provide ONLY the Java code (class Solution). Do NOT include markdown code blocks or explanations.
 
 Problem: ${problemText}
-Analysis: ${JSON.stringify(analysis, null, 2)}
+Analysis: ${JSON.stringify(analysis)}
   `;
 
-  let code = await callOpenRouter(prompt);
-  code = code.replace(/```java/gi, '').replace(/```/g, '').trim();
-  return code;
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.0-flash',
+    contents: prompt,
+    config: {
+      maxOutputTokens: 1000,
+    }
+  });
+
+  let code = response.text;
+  if (!code) throw new Error('No code response from Gemini');
+  return code.replace(/```java/gi, '').replace(/```/g, '').trim();
 }
 
 // Helper: Generate test wrapper and execute via Judge0
@@ -81,7 +71,16 @@ Problem: ${problemText}
 Solution: ${code}
   `;
 
-  let testCode = await callOpenRouter(prompt);
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.0-flash',
+    contents: prompt,
+    config: {
+      maxOutputTokens: 1200,
+    }
+  });
+
+  let testCode = response.text;
+  if (!testCode) throw new Error('No test code response from Gemini');
   testCode = testCode.replace(/```java/gi, '').replace(/```/g, '').trim();
 
   const judge0Response = await fetch('https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&wait=true', {
@@ -113,9 +112,17 @@ Current Code: ${code}
 Provide ONLY the corrected "class Solution" code without markdown or main method.
   `;
 
-  let fixedCode = await callOpenRouter(prompt);
-  fixedCode = fixedCode.replace(/```java/gi, '').replace(/```/g, '').trim();
-  return fixedCode;
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.0-flash',
+    contents: prompt,
+    config: {
+      maxOutputTokens: 1000,
+    }
+  });
+
+  let fixedCode = response.text;
+  if (!fixedCode) throw new Error('No debug response from Gemini');
+  return fixedCode.replace(/```java/gi, '').replace(/```/g, '').trim();
 }
 
 export async function POST(req: Request) {

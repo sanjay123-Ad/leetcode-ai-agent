@@ -1,4 +1,7 @@
 import { NextResponse } from 'next/server';
+import { GoogleGenAI } from '@google/genai';
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export async function POST(req: Request) {
   try {
@@ -10,41 +13,27 @@ export async function POST(req: Request) {
 
     const prompt = `
 You are an expert Java developer and algorithm solver.
-I will provide you with a LeetCode problem description and an analysis of the problem.
-Your task is to write the optimal Java solution based on the analysis provided.
+Write an optimal LeetCode Java solution (class Solution) for this problem.
 
 Requirements:
-1. Provide ONLY the Java code (class Solution). Do NOT include any explanations, markdown code blocks, or conversational text.
-2. The code should be a single Java class named Solution with the method for the problem.
-3. Make the code clean, well-commented, and optimal.
+1. Provide ONLY a standard "class Solution" containing the solution method.
+2. Do NOT include markdown code blocks, main method, or extra explanations.
+3. Make the code optimal and complete.
 
-Problem Description:
-${problemText}
-
-Problem Analysis:
-${JSON.stringify(analysis, null, 2)}
+Problem: ${problemText}
+Analysis: ${JSON.stringify(analysis)}
     `;
 
-    const apiKey = process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY;
-    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://github.com/sanjay123-Ad/leetcode-ai-agent',
-        'X-Title': 'LeetCode AI Agent',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.0-flash-exp:free',
-        messages: [{ role: 'user', content: prompt }],
-      }),
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: prompt,
+      config: {
+        maxOutputTokens: 1000,
+      }
     });
 
-    const data = await res.json();
-    let code = data.choices?.[0]?.message?.content;
-    if (!code) {
-      throw new Error(data.error?.message || 'No response from OpenRouter');
-    }
+    let code = response.text;
+    if (!code) throw new Error("No response from Gemini");
 
     code = code.replace(/```java/gi, '').replace(/```/g, '').trim();
 
