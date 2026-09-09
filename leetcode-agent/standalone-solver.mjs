@@ -27,30 +27,94 @@ function stripHtml(html) {
 
 async function fetchDailyChallenge() {
   console.log('📥 Fetching daily challenge...');
-  const apis = [
-    'https://alfa-leetcode-api.onrender.com/daily',
-    'https://leetcode-api-fasz.vercel.app/dailyQuestion',
-  ];
 
-  for (const url of apis) {
-    try {
-      const res = await fetch(url);
-      if (!res.ok) continue;
+  // Source 1: Alfa LeetCode API
+  try {
+    const res = await fetch('https://alfa-leetcode-api.onrender.com/daily');
+    if (res.ok) {
       const data = await res.json();
-      const title = data.questionTitle || data.title;
-      if (!title) continue;
-      return {
-        date: data.date || new Date().toISOString().split('T')[0],
-        link: data.questionLink || `https://leetcode.com/problems/${data.titleSlug}/`,
-        title,
-        titleSlug: data.titleSlug,
-        difficulty: data.difficulty,
-        content: stripHtml(data.question || data.content || ''),
-        tags: data.topicTags?.map(t => t.name) || [],
-      };
-    } catch { continue; }
+      if (data.questionTitle) {
+        return {
+          date: data.date || new Date().toISOString().split('T')[0],
+          link: data.questionLink || `https://leetcode.com/problems/${data.titleSlug}/`,
+          title: data.questionTitle,
+          titleSlug: data.titleSlug,
+          difficulty: data.difficulty,
+          content: stripHtml(data.question || ''),
+          tags: data.topicTags?.map(t => t.name) || [],
+        };
+      }
+    }
+  } catch (e) {
+    console.log('⚠️ Alfa API failed, trying secondary API...');
   }
-  throw new Error('All LeetCode API sources failed');
+
+  // Source 2: LeetCode Fasz API
+  try {
+    const res = await fetch('https://leetcode-api-fasz.vercel.app/dailyQuestion');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.title) {
+        return {
+          date: new Date().toISOString().split('T')[0],
+          link: `https://leetcode.com/problems/${data.titleSlug}/`,
+          title: data.title,
+          titleSlug: data.titleSlug,
+          difficulty: data.difficulty,
+          content: stripHtml(data.content || data.question || ''),
+          tags: data.topicTags?.map(t => t.name) || [],
+        };
+      }
+    }
+  } catch (e) {
+    console.log('⚠️ Fasz API failed, trying direct GraphQL...');
+  }
+
+  // Source 3: Direct LeetCode GraphQL
+  try {
+    const query = `query questionOfToday {
+      activeDailyCodingChallengeQuestion {
+        date
+        link
+        question {
+          title
+          titleSlug
+          difficulty
+          content
+          topicTags { name }
+        }
+      }
+    }`;
+
+    const res = await fetch('https://leetcode.com/graphql', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+      body: JSON.stringify({ query }),
+    });
+
+    if (res.ok) {
+      const result = await res.json();
+      const q = result.data?.activeDailyCodingChallengeQuestion?.question;
+      if (q && q.title) {
+        return {
+          date: result.data.activeDailyCodingChallengeQuestion.date,
+          link: `https://leetcode.com${result.data.activeDailyCodingChallengeQuestion.link}`,
+          title: q.title,
+          titleSlug: q.titleSlug,
+          difficulty: q.difficulty,
+          content: stripHtml(q.content || ''),
+          tags: q.topicTags?.map(t => t.name) || [],
+        };
+      }
+    }
+  } catch (e) {
+    console.log('⚠️ Direct GraphQL failed');
+  }
+
+  throw new Error('All 3 LeetCode API sources failed to fetch daily challenge');
 }
 
 async function callGemini(prompt) {
