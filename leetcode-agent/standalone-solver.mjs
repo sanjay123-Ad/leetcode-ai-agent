@@ -78,7 +78,11 @@ Problem: ${problemText}`;
   const analysis = JSON.parse(jsonMatch?.[0] || '{}');
 
   console.log('💻 Generating Java code...');
-  const codePrompt = `Write an optimal Java solution for this LeetCode problem. Return ONLY the Java code, no markdown, no explanation.
+  const codePrompt = `Write an optimal LeetCode Java solution for this problem.
+Important Rules:
+1. Provide ONLY a standard "class Solution" containing the required method.
+2. Do NOT include a Main class or system output.
+3. Do NOT include markdown text outside code blocks.
 
 Problem: ${problemText}
 Analysis: ${JSON.stringify(analysis)}`;
@@ -91,14 +95,13 @@ Analysis: ${JSON.stringify(analysis)}`;
 
 async function testCode(problemText, code, attempt) {
   console.log(`🧪 Writing and running tests (attempt ${attempt})...`);
-  const testPrompt = `Write a clean, minimal, runnable Java class named "Main" that tests the following solution against 3 key test cases.
-Do NOT use external libraries. Use standard System.out.println.
-If all test cases pass, print EXACTLY "ALL_TESTS_PASSED".
-If any test case fails, print EXACTLY "TEST_FAILED".
-Return ONLY raw Java code inside class Main, no markdown, no comments.
+  const testPrompt = `Given this LeetCode problem and Solution class, generate a single Java harness class named "Main" that instantiates Solution and tests it against 3 representative test cases.
+Print EXACTLY "ALL_TESTS_PASSED" if all pass. Print EXACTLY "TEST_FAILED" if any fail.
+Return ONLY raw runnable Java code containing Main class and Solution class.
 
 Problem: ${problemText}
-Solution: ${code}`;
+Solution:
+${code}`;
 
   let testCode = await callGemini(testPrompt);
   testCode = testCode.replace(/^```java\n?/m, '').replace(/^```\n?/m, '').replace(/```$/m, '').trim();
@@ -124,13 +127,13 @@ Solution: ${code}`;
 
 async function debugCode(problemText, code, error) {
   console.log('🔧 AI debugging code...');
-  const debugPrompt = `Fix this Java solution for the LeetCode problem. The tests failed with this error:
+  const debugPrompt = `Fix this Java "class Solution" for the LeetCode problem. The test execution failed with:
 ${error}
 
 Problem: ${problemText}
-Buggy code: ${code}
+Current Code: ${code}
 
-Return ONLY the fixed Java code, no markdown.`;
+Return ONLY the corrected "class Solution" code. No extra text or main methods.`;
 
   let fixed = await callGemini(debugPrompt);
   fixed = fixed.replace(/^```java\n?/m, '').replace(/^```\n?/m, '').replace(/```$/m, '').trim();
