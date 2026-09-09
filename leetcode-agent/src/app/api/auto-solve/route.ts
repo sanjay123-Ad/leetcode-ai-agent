@@ -126,22 +126,25 @@ export async function POST(req: Request) {
   };
 
   try {
-    const { problem } = await req.json();
+    const body = await req.json();
+    const problemText = body.problemText || body.problem?.content;
+    const title = body.challengeInfo?.title || body.problem?.title || 'Daily Problem';
+    const difficulty = body.challengeInfo?.difficulty || body.problem?.difficulty || 'Medium';
 
-    if (!problem || !problem.content) {
+    if (!problemText) {
       return NextResponse.json({ error: 'Valid problem content is required' }, { status: 400 });
     }
 
-    addLog(`🚀 Starting Autonomous Solve pipeline for: "${problem.title}"`);
+    addLog(`🚀 Starting Autonomous Solve pipeline for: "${title}"`);
 
     // Step 1: Analyze
     addLog('🧠 Phase 1: AI Analyzing problem statement & constraints...');
-    const analysis = await analyzeProblem(problem.content);
+    const analysis = await analyzeProblem(problemText);
     addLog(`✅ Analysis complete! Target Time: ${analysis.expectedTimeComplexity}, Space: ${analysis.expectedSpaceComplexity}`);
 
     // Step 2: Generate Initial Code
     addLog('💻 Phase 2: Generating optimal Java solution...');
-    let currentCode = await generateCode(problem.content, analysis);
+    let currentCode = await generateCode(problemText, analysis);
     addLog('✅ Initial Java code generated.');
 
     // Step 3: Self-Healing Testing Loop (Up to 3 Attempts)
@@ -153,7 +156,7 @@ export async function POST(req: Request) {
       attempts = i;
       addLog(`🧪 Phase 3 (Attempt ${i}/3): Generating unit tests & compiling on Judge0...`);
 
-      const { execution } = await testCode(problem.content, currentCode);
+      const { execution } = await testCode(problemText, currentCode);
       lastExecutionResult = execution;
 
       const stdout = execution.stdout || '';
@@ -173,7 +176,7 @@ export async function POST(req: Request) {
         if (i < 3) {
           addLog(`🔧 Self-Healing: Triggering AI Debugger to fix code...`);
           const errorContext = `stdout: ${stdout}\nstderr: ${stderr}\ncompile_output: ${compileOutput}`;
-          currentCode = await debugCode(problem.content, currentCode, errorContext);
+          currentCode = await debugCode(problemText, currentCode, errorContext);
           addLog(`✅ AI Debugger refactored code. Retrying...`);
         }
       }
@@ -188,8 +191,8 @@ export async function POST(req: Request) {
       .from('problem_history')
       .insert([
         {
-          title: problem.title,
-          difficulty: problem.difficulty,
+          title,
+          difficulty,
           code: finalCode,
           attempts,
           passed,
