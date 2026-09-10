@@ -27,6 +27,7 @@ jobs:
         working-directory: leetcode-agent
 
       - name: Run AI LeetCode Solver
+        id: solver
         run: node standalone-solver.mjs
         working-directory: leetcode-agent
         env:
@@ -45,10 +46,10 @@ jobs:
           secure: true
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
-          subject: "✅ SUCCESS: LeetCode Daily Solved by AI!"
+          subject: "✅ SUCCESS: ${{ steps.solver.outputs.PROBLEM_TITLE }}"
           to: sanjayroyal585858@gmail.com
           from: GitHub Actions Bot
-          body: "Hello Sanjay,\n\nThe AI Agent successfully solved today's LeetCode problem and saved the result to your Supabase database! 🚀\n\nAwesome work!\n\nBest,\nYour AI Agent"
+          html_body: file://leetcode-agent/email_success.html
 
       - name: Send Failure Email
         if: failure()

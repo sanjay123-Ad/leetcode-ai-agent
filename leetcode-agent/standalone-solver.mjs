@@ -4,6 +4,7 @@
 // It calls the AI APIs directly.
 
 import { createClient } from '@supabase/supabase-js';
+import fs from 'fs';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const JUDGE0_API_KEY = process.env.JUDGE0_API_KEY;
@@ -274,6 +275,30 @@ async function main() {
   console.log(`Status   : ${allPassed ? '✅ PASSED' : '❌ FAILED after 3 attempts'}`);
   console.log(`Attempts : ${finalAttempt}`);
   console.log('==============================================\n');
+
+  // Generate Email HTML
+  const escapedCode = code.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const emailHtml = `
+    <div style="font-family: sans-serif; max-width: 800px; margin: 0 auto; color: #333;">
+      <h2 style="color: #059669;">✅ LeetCode Daily Solved!</h2>
+      <p><strong>Problem:</strong> ${challenge.title} (${challenge.difficulty})</p>
+      <p><strong>Time Complexity:</strong> <span style="font-family: monospace; background: #f3f4f6; padding: 2px 6px; border-radius: 4px;">${analysis.expectedTimeComplexity || 'N/A'}</span></p>
+      <p><strong>Space Complexity:</strong> <span style="font-family: monospace; background: #f3f4f6; padding: 2px 6px; border-radius: 4px;">${analysis.expectedSpaceComplexity || 'N/A'}</span></p>
+      <br/>
+      <h3 style="color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;">Java Solution:</h3>
+      <pre style="background-color: #1f2937; color: #f3f4f6; padding: 16px; border-radius: 8px; font-family: 'Courier New', Courier, monospace; overflow-x: auto;">
+${escapedCode}
+      </pre>
+      <p style="color: #6b7280; font-style: italic; margin-top: 16px;">This code is ready to copy-paste directly into LeetCode!</p>
+    </div>
+  `;
+  
+  fs.writeFileSync('email_success.html', emailHtml);
+
+  // Pass variables to next GitHub Actions steps
+  if (process.env.GITHUB_OUTPUT) {
+    fs.appendFileSync(process.env.GITHUB_OUTPUT, \`PROBLEM_TITLE=\${challenge.title}\\n\`);
+  }
 }
 
 main().catch(err => {
