@@ -27,7 +27,6 @@ jobs:
         working-directory: leetcode-agent
 
       - name: Run AI LeetCode Solver
-        id: solver
         run: node standalone-solver.mjs
         working-directory: leetcode-agent
         env:
@@ -37,21 +36,30 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
 
-      - name: Send Email Notification
+      - name: Send Success Email
+        if: success()
         uses: dawidd6/action-send-mail@v3
-        if: always()
         with:
           server_address: smtp.gmail.com
           server_port: 465
           secure: true
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
-          subject: "LeetCode AI Agent: ${{ steps.solver.outputs.SOLVE_STATUS }}"
-          to: ${{ secrets.MAIL_USERNAME }}
-          from: LeetCode AI Agent
-          body: |
-            Daily LeetCode Problem: ${{ steps.solver.outputs.PROBLEM_TITLE }}
-            Result: ${{ steps.solver.outputs.SOLVE_STATUS }}
-            
-            Check your Supabase dashboard or GitHub repository for details!
-            https://github.com/${{ github.repository }}/actions
+          subject: "✅ SUCCESS: LeetCode Daily Solved by AI!"
+          to: sanjayroyal585858@gmail.com
+          from: GitHub Actions Bot
+          body: "Hello Sanjay,\n\nThe AI Agent successfully solved today's LeetCode problem and saved the result to your Supabase database! 🚀\n\nAwesome work!\n\nBest,\nYour AI Agent"
+
+      - name: Send Failure Email
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "❌ FAILED: LeetCode Daily AI Solver"
+          to: sanjayroyal585858@gmail.com
+          from: GitHub Actions Bot
+          body: "Hello Sanjay,\n\nThe AI Agent failed to solve today's LeetCode problem or encountered an error. ⚠️\n\nPlease check the GitHub Actions logs for more details.\n\nBest,\nYour AI Agent"
