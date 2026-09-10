@@ -297,7 +297,7 @@ ${escapedCode}
 
   // Pass variables to next GitHub Actions steps
   if (process.env.GITHUB_OUTPUT) {
-    fs.appendFileSync(process.env.GITHUB_OUTPUT, \`PROBLEM_TITLE=\${challenge.title}\\n\`);
+    fs.appendFileSync(process.env.GITHUB_OUTPUT, `PROBLEM_TITLE=${challenge.title}\n`);
   }
 }
 
