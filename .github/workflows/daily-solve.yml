@@ -27,6 +27,7 @@ jobs:
         working-directory: leetcode-agent
 
       - name: Run AI LeetCode Solver
+        id: solver
         run: node standalone-solver.mjs
         working-directory: leetcode-agent
         env:
@@ -35,3 +36,22 @@ jobs:
           JUDGE0_API_KEY: ${{ secrets.JUDGE0_API_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+
+      - name: Send Email Notification
+        uses: dawidd6/action-send-mail@v3
+        if: always()
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "LeetCode AI Agent: ${{ steps.solver.outputs.SOLVE_STATUS }}"
+          to: ${{ secrets.MAIL_USERNAME }}
+          from: LeetCode AI Agent
+          body: |
+            Daily LeetCode Problem: ${{ steps.solver.outputs.PROBLEM_TITLE }}
+            Result: ${{ steps.solver.outputs.SOLVE_STATUS }}
+            
+            Check your Supabase dashboard or GitHub repository for details!
+            https://github.com/${{ github.repository }}/actions
