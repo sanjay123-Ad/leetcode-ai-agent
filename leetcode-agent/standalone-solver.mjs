@@ -274,14 +274,6 @@ async function main() {
   console.log(`Status   : ${allPassed ? '✅ PASSED' : '❌ FAILED after 3 attempts'}`);
   console.log(`Attempts : ${finalAttempt}`);
   console.log('==============================================\n');
-
-  // Export variables to GitHub Actions
-  if (process.env.GITHUB_OUTPUT) {
-    import('fs').then(fs => {
-      fs.appendFileSync(process.env.GITHUB_OUTPUT, `PROBLEM_TITLE=${challenge.title}\n`);
-      fs.appendFileSync(process.env.GITHUB_OUTPUT, `SOLVE_STATUS=${allPassed ? '✅ PASSED' : '❌ FAILED'}\n`);
-    });
-  }
 }
 
 main().catch(err => {
