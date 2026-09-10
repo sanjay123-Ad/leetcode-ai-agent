@@ -217,11 +217,16 @@ export async function POST(req: Request) {
       success: true,
       data: {
         analysis,
-        code: finalCode,
-        passed,
+        finalCode,
+        allPassed: passed,
         attempts,
         execution: lastExecutionResult,
         logs,
+        steps: [
+          { step: 'analyze', status: 'done' },
+          { step: 'generate', status: 'done' },
+          { step: `test_attempt_${attempts}`, status: passed ? 'passed' : 'failed' },
+        ],
       }
     });
 
