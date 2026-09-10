@@ -23,7 +23,7 @@ ${problemText}
   `;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash-lite',
+    model: 'gemini-3.5-flash-lite',
     contents: prompt,
     config: {
       responseMimeType: 'application/json',
@@ -48,7 +48,7 @@ Analysis: ${JSON.stringify(analysis)}
   `;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash-lite',
+    model: 'gemini-3.5-flash-lite',
     contents: prompt,
     config: {
       maxOutputTokens: 1000,
@@ -72,7 +72,7 @@ Solution: ${code}
   `;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash-lite',
+    model: 'gemini-3.5-flash-lite',
     contents: prompt,
     config: {
       maxOutputTokens: 1200,
@@ -113,7 +113,7 @@ Provide ONLY the corrected "class Solution" code without markdown or main method
   `;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash-lite',
+    model: 'gemini-3.5-flash-lite',
     contents: prompt,
     config: {
       maxOutputTokens: 1000,
