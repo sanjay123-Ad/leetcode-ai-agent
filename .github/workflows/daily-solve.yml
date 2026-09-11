@@ -3,7 +3,7 @@ name: 🤖 Daily LeetCode AI Solver
 on:
   # Run every day at 2:30 AM UTC = 8:00 AM IST
   schedule:
-    - cron: '30 3 * * *'
+    - cron: '30 2 * * *'
   
   # Also allow manual trigger from GitHub UI
   workflow_dispatch:
@@ -31,7 +31,6 @@ jobs:
         run: node standalone-solver.mjs
         working-directory: leetcode-agent
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           JUDGE0_API_KEY: ${{ secrets.JUDGE0_API_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
