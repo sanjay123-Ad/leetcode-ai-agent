@@ -10,7 +10,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "daily": "node scripts/daily-solve.ts",
-    "bench": "node scripts/bench.ts"
+    "bench": "node scripts/bench.ts",
+    "replay-persistence": "node scripts/replay-persistence.ts",
+    "recover-history": "node scripts/recover-history.ts"
   },
   "dependencies": {
     "next": "16.4.3",

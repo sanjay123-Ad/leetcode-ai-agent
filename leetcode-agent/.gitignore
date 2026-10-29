@@ -39,6 +39,7 @@ yarn-error.log*
 history.json
 email_success.html
 email_failure.html
+pending-persist/
 bench-results.json
 
 # vercel

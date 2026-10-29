@@ -58,6 +58,13 @@ jobs:
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
           # Optional: only used if no JDK is available on the runner.
           JUDGE0_API_KEY: ${{ secrets.JUDGE0_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          # Server-side key: required to write agent_runs, which denies the publishable
+          # key by design. The run still completes and emails without it - the save is
+          # reported as failed and the record is parked as an artifact for replay.
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # Kept for backwards compatibility with the legacy problem_history reader.
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
 
@@ -70,6 +77,7 @@ jobs:
             leetcode-agent/history.json
             leetcode-agent/email_success.html
             leetcode-agent/email_failure.html
+            leetcode-agent/pending-persist/
           if-no-files-found: ignore
 
       # Email delivery is unchanged: same SMTP settings and the same recipient as
@@ -93,6 +101,7 @@ jobs:
       # The subject states the verification level, so a run that produced an unverified
       # solution is not reported as a success.
       - name: Send result email
+        id: result_mail
         if: success() && steps.mail.outputs.configured == 'true'
         uses: dawidd6/action-send-mail@v3
         with:
@@ -110,6 +119,7 @@ jobs:
       # the test suite, not only the solver. The solver writes email_failure.html naming
       # the component that failed; when it never got that far, the plain body is used.
       - name: Send failure email
+        id: failure_mail
         if: failure() && steps.mail.outputs.configured == 'true'
         uses: dawidd6/action-send-mail@v3
         with:
@@ -132,3 +142,21 @@ jobs:
 
             Run log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           html_body: file://leetcode-agent/email_failure.html
+
+      # Writes the notification outcome back to the run's row.
+      #
+      # The status is read from the mail steps' OWN outcome, not inferred from the job
+      # status: a run whose solver failed still sends a failure email, and that delivery
+      # succeeding must not be recorded as "failed". Runs after both mail steps and never
+      # fails the job - the solution is already saved and the email has already been sent
+      # or not, independently of this call.
+      - name: Record email delivery status
+        if: always()
+        continue-on-error: true
+        run: node scripts/record-email.ts "${{ steps.mail.outputs.configured != 'true' && 'skipped' || (steps.result_mail.outcome == 'success' || steps.failure_mail.outcome == 'success') && 'sent' || (steps.result_mail.outcome == 'failure' || steps.failure_mail.outcome == 'failure') && 'failed' || 'skipped' }}"
+        working-directory: leetcode-agent
+        env:
+          EXECUTION_ID: ${{ steps.solver.outputs.EXECUTION_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

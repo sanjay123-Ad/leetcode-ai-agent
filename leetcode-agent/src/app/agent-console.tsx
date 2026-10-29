@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { LogEntry } from '@/lib/log.ts';
 import {
   STATUS_LABELS,
@@ -64,15 +65,16 @@ export default function AgentConsole({ initialHistory }: { initialHistory: Histo
   const [loadingTest, setLoadingTest] = useState(false);
 
   /* ---------------- history ---------------- */
-  const [history, setHistory] = useState<HistoryResponse>(initialHistory);
+  // Rendered by the server component, which reads the database directly. Refreshing the
+  // route re-runs that read on the server, so neither the Supabase key nor the history
+  // token is ever sent to the browser - and /api/history stays available only to
+  // authenticated callers.
+  const router = useRouter();
+  const history = initialHistory;
 
-  const loadHistory = useCallback(async () => {
-    try {
-      setHistory(await getJson<HistoryResponse>('/api/history?limit=10'));
-    } catch {
-      // History is a convenience panel; a failure here must not disturb the page.
-    }
-  }, []);
+  const refreshHistory = useCallback(() => {
+    router.refresh();
+  }, [router]);
 
   const runSolve = async (target: { titleSlug?: string; url?: string }) => {
     setAutoLoading(true);
@@ -114,7 +116,7 @@ export default function AgentConsole({ initialHistory }: { initialHistory: Histo
           else if (message.type === 'error') setError(message.error);
         }
       }
-      await loadHistory();
+      refreshHistory();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Auto-solve failed');
     } finally {
@@ -394,7 +396,7 @@ export default function AgentConsole({ initialHistory }: { initialHistory: Histo
           </section>
         )}
 
-        {history.records.length > 0 && <HistoryPanel history={history} />}
+        {history.entries.length > 0 && <HistoryPanel history={history} />}
       </div>
     </div>
   );
@@ -779,22 +781,74 @@ function SolveReport({ solve }: { solve: SolveResponse }) {
 }
 
 function HistoryPanel({ history }: { history: HistoryResponse }) {
+  const [open, setOpen] = useState<string | null>(null);
+
+  const ms = (value?: number) => (value === undefined ? '-' : `${Math.round(value / 1000)}s`);
+  const tests = (entry: HistoryResponse['entries'][number]) =>
+    entry.testsTotal ? `${entry.testsPassed ?? 0}/${entry.testsTotal}` : '-';
+
   return (
     <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 shadow-xl space-y-3">
       <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
         <h2 className="text-lg font-semibold">Recent runs</h2>
-        <span className="text-xs text-neutral-500">source: {history.source}</span>
+        <span className="text-xs text-neutral-500">
+          source: {history.source}
+          {history.detail ? ` — ${history.detail}` : ''}
+        </span>
       </div>
+
       <div className="space-y-1">
-        {history.records.map((record, index) => (
-          <div key={index} className="flex items-center justify-between text-sm py-1 border-b border-neutral-800/50">
-            <span className="text-neutral-300">{record.title}</span>
-            <span className="flex items-center gap-2 text-xs">
-              <span className={`px-2 py-0.5 rounded-full ${difficultyClass(record.difficulty)}`}>{record.difficulty}</span>
-              <span className="font-mono text-neutral-500">{record.status ?? (record.passed ? 'examples passed' : 'not verified')}</span>
-            </span>
-          </div>
-        ))}
+        {history.entries.map((entry, index) => {
+          const key = entry.executionId ?? `${entry.title}-${index}`;
+          const expanded = open === key;
+
+          return (
+            <div key={key} className="border-b border-neutral-800/50 py-1">
+              <button
+                onClick={() => setOpen(expanded ? null : key)}
+                className="w-full flex items-center justify-between text-sm text-left hover:bg-neutral-800/40 rounded px-1 transition-colors"
+              >
+                <span className="text-neutral-300 truncate">
+                  {entry.questionId ? `${entry.questionId}. ` : ''}
+                  {entry.title}
+                </span>
+                <span className="flex items-center gap-2 text-xs shrink-0">
+                  <span className="text-neutral-600">{entry.solvedAt?.slice(0, 10) ?? ''}</span>
+                  <span className={`px-2 py-0.5 rounded-full ${difficultyClass(entry.difficulty)}`}>{entry.difficulty}</span>
+                  <span className="font-mono text-neutral-500">{entry.verificationStatus ?? 'unknown'}</span>
+                  <span className="text-neutral-600">{expanded ? '-' : '+'}</span>
+                </span>
+              </button>
+
+              {expanded && (
+                <div className="mt-2 space-y-2 px-1 pb-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono text-neutral-400">
+                    <span>attempts: {entry.attempts ?? '-'}</span>
+                    <span>repairs: {entry.repairs ?? '-'}</span>
+                    <span>tests: {tests(entry)}</span>
+                    <span>runner: {entry.runner ?? '-'}</span>
+                    <span>duration: {ms(entry.durationMs)}</span>
+                    <span>tokens: {(entry.promptTokens ?? 0) + (entry.outputTokens ?? 0) || '-'}</span>
+                    <span>email: {entry.emailStatus ?? '-'}</span>
+                    <span className={entry.leetcodeAccepted ? 'text-emerald-400' : 'text-neutral-500'}>
+                      leetcode: {entry.leetcodeAccepted ? 'accepted' : 'not confirmed'}
+                    </span>
+                  </div>
+
+                  {entry.javaSignature && (
+                    <p className="text-xs font-mono text-neutral-500 truncate">{entry.javaSignature}</p>
+                  )}
+
+                  {entry.code ? (
+                    <CodeBlock code={entry.code} max="max-h-[320px]" />
+                  ) : (
+                    <p className="text-xs text-neutral-500 italic">No solution stored for this run.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

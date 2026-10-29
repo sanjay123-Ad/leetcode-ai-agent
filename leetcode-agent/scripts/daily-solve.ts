@@ -10,10 +10,11 @@
 
 import { fetchDailyChallenge, fetchProblemBySlug } from '../src/lib/leetcode.ts';
 import { solveProblem, type SolveOutput } from '../src/lib/pipeline.ts';
-import { persistRun } from '../src/lib/persistence.ts';
+import { buildRunRecord, executionId, saveRun, type PersistenceResult } from '../src/lib/persistence.ts';
 import { configStatus } from '../src/lib/config.ts';
 import { selectRunner } from '../src/lib/runner/index.ts';
 import { STATUS_LABELS } from '../src/lib/api-types.ts';
+import { isEntryPoint } from './entry-point.ts';
 
 function escapeHtml(value: string): string {
   return value
@@ -23,7 +24,7 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function buildEmail(result: SolveOutput): string {
+function buildEmail(result: SolveOutput, persistence: PersistenceResult): string {
   const checks = Object.entries(result.checks)
     .map(([key, value]) => `<li>${value ? '✅' : '⬜'} ${escapeHtml(key)}</li>`)
     .join('\n');
@@ -56,6 +57,9 @@ ${escapeHtml(result.finalCode || '// no code was produced')}
     ${result.usage.geminiCalls} model call(s), ${result.usage.judge0Submissions} Judge0 submission(s),
     ${result.usage.promptTokens + result.usage.outputTokens} tokens, ${Math.round(result.usage.elapsedMs / 1000)}s.
   </p>
+  <p style="color:${persistence.ok ? '#6b7280' : '#b91c1c'};font-size:12px;">
+    <strong>Database:</strong> ${escapeHtml(persistence.detail)}
+  </p>
 </div>`;
 }
 
@@ -83,8 +87,29 @@ async function main() {
   }
 
   const result = await solveProblem(problem);
-  const persistence = await persistRun(result);
-  console.log(`[daily] history: ${persistence.detail}`);
+
+  // Save BEFORE the notification: persistence must never depend on email delivery, and
+  // email must never depend on persistence. The email status is written back afterwards
+  // by scripts/record-email.ts, keyed by this same execution id.
+  const id = executionId(problem.titleSlug);
+  currentExecutionId = id;
+  const persistence = await saveRun(
+    buildRunRecord(result, {
+      source: process.env.GITHUB_RUN_ID ? 'github-actions' : 'cli',
+      executionId: id,
+      model: status.model,
+    }),
+  );
+
+  if (persistence.ok) {
+    console.log(`[daily] database: ${persistence.detail}`);
+  } else {
+    // Never claim a save that did not happen.
+    console.error(`[daily] database: NOT SAVED - ${persistence.detail}`);
+    if (process.env.GITHUB_ACTIONS) {
+      console.log(`::warning::Run was not saved to Supabase: ${persistence.detail}`);
+    }
+  }
 
   console.log('\n==============================================');
   console.log('RESULT');
@@ -93,6 +118,8 @@ async function main() {
   console.log(`Status         : ${result.status} (${STATUS_LABELS[result.status]})`);
   console.log(`Submission-ready: ${result.submissionReady ? 'yes' : 'no'} — ${result.readinessReason}`);
   console.log(`Attempts       : ${result.attempts.length}`);
+  console.log(`Execution id   : ${id}`);
+  console.log(`Database       : ${persistence.ok ? 'saved' : 'NOT SAVED - ' + persistence.detail}`);
   console.log(
     `Cost           : ${result.usage.geminiCalls} model call(s), ${result.usage.judge0Submissions} Judge0 submission(s), ` +
       `${result.usage.promptTokens + result.usage.outputTokens} tokens, ${Math.round(result.usage.elapsedMs / 1000)}s`,
@@ -100,7 +127,7 @@ async function main() {
   console.log('==============================================\n');
 
   const [fs] = await Promise.all([import('node:fs/promises')]);
-  await fs.writeFile('email_success.html', buildEmail(result), 'utf8');
+  await fs.writeFile('email_success.html', buildEmail(result, persistence), 'utf8');
 
   if (process.env.GITHUB_OUTPUT) {
     const subjectPrefix = result.submissionReady ? 'VERIFIED' : `UNVERIFIED (${result.status})`;
@@ -112,6 +139,8 @@ async function main() {
         `VERIFICATION_STATUS=${result.status}`,
         `SUBMISSION_READY=${result.submissionReady ? 'true' : 'false'}`,
         `SUBJECT_PREFIX=${subjectPrefix}`,
+        `EXECUTION_ID=${id}`,
+        `PERSISTED=${persistence.ok ? 'true' : 'false'}`,
         '',
       ].join('\n'),
     );
@@ -133,6 +162,9 @@ async function main() {
 
 /** Known at module scope so the failure handler can name the problem if we got that far. */
 let knownProblem: Awaited<ReturnType<typeof fetchProblemBySlug>>;
+
+/** Set once the run has an identity, so the failure report can reference it. */
+let currentExecutionId: string | undefined;
 
 type FailureComponent = 'configuration' | 'LeetCode API' | 'Gemini' | 'Java execution' | 'pipeline';
 
@@ -180,6 +212,25 @@ async function reportFailure(error: unknown) {
 
   console.error(`[daily] FAILED in ${component}: ${safeMessage}`);
 
+  // Record the failure too, so a day the pipeline fell over is visible in the history
+  // rather than being an unexplained gap. The message has already been through redact().
+  // This is best-effort: it must not interfere with the failure email.
+  const id = currentExecutionId ?? executionId(knownProblem?.titleSlug);
+  const stored = await saveRun({
+    execution_id: id,
+    source: process.env.GITHUB_RUN_ID ? 'github-actions' : 'cli',
+    title: title || 'Unknown problem',
+    title_slug: knownProblem?.titleSlug,
+    difficulty: knownProblem?.difficulty,
+    question_id: knownProblem?.questionFrontendId,
+    verification_status: 'failed',
+    failure_component: component,
+    failure_message: safeMessage.slice(0, 2000),
+    gh_run_id: process.env.GITHUB_RUN_ID,
+    email_status: 'pending',
+  });
+  console.log(`[daily] database: ${stored.ok ? stored.detail : `NOT SAVED - ${stored.detail}`}`);
+
   try {
     const fs = await import('node:fs/promises');
 
@@ -214,6 +265,7 @@ async function reportFailure(error: unknown) {
           // GITHUB_OUTPUT is line-based, so the message must stay on one line.
           `FAILURE_MESSAGE=${safeMessage.replace(/[\r\n]+/g, ' ').slice(0, 400)}`,
           `PROBLEM_TITLE=${title}`,
+          `EXECUTION_ID=${id}`,
           '',
         ].join('\n'),
       );
@@ -239,17 +291,7 @@ export async function run(): Promise<void> {
   }
 }
 
-/** True when this file was started directly, rather than imported. */
-function isEntryPoint(): boolean {
-  const entry = process.argv[1];
-  if (!entry) return false;
-  try {
-    return import.meta.url === new URL(`file://${entry.replace(/\\/g, '/')}`).href || import.meta.url.endsWith(entry.replace(/\\/g, '/'));
-  } catch {
-    return false;
-  }
-}
 
-if (isEntryPoint()) {
+if (isEntryPoint(import.meta.url)) {
   void run();
 }

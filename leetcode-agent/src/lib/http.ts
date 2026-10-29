@@ -38,8 +38,17 @@ const DEFAULT_RETRY_ON = [408, 409, 425, 429, 500, 502, 503, 504];
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/** Exponential backoff with jitter, capped so retries cannot outlive a request budget. */
-export function backoffDelay(attempt: number, baseMs = 700, capMs = 8000): number {
+/**
+ * Exponential backoff with jitter, capped so retries cannot outlive a request budget.
+ *
+ * `HTTP_RETRY_BASE_MS` shortens the base delay; it exists so test suites and local dry
+ * runs do not have to sit through real backoff. Production leaves it unset.
+ */
+export function backoffDelay(
+  attempt: number,
+  baseMs = Number(process.env.HTTP_RETRY_BASE_MS) || 700,
+  capMs = 8000,
+): number {
   const exponential = Math.min(capMs, baseMs * 2 ** (attempt - 1));
   return Math.round(exponential / 2 + Math.random() * (exponential / 2));
 }
