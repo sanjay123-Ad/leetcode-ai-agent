@@ -13,6 +13,7 @@
 
 import { replayPendingRecords } from '../src/lib/persistence.ts';
 import { configStatus } from '../src/lib/config.ts';
+import { isEntryPoint } from './entry-point.ts';
 
 export async function run(): Promise<number> {
   if (!configStatus().supabaseWritable) {
@@ -37,11 +38,7 @@ export async function run(): Promise<number> {
   return saved === attempted ? 0 : 0;
 }
 
-function isEntryPoint(): boolean {
-  const entry = process.argv[1];
-  return Boolean(entry && import.meta.url.endsWith(entry.replace(/\\/g, '/')));
-}
 
-if (isEntryPoint()) {
+if (isEntryPoint(import.meta.url)) {
   process.exitCode = await run();
 }

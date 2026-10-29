@@ -14,6 +14,7 @@ import { buildRunRecord, executionId, saveRun, type PersistenceResult } from '..
 import { configStatus } from '../src/lib/config.ts';
 import { selectRunner } from '../src/lib/runner/index.ts';
 import { STATUS_LABELS } from '../src/lib/api-types.ts';
+import { isEntryPoint } from './entry-point.ts';
 
 function escapeHtml(value: string): string {
   return value
@@ -271,17 +272,7 @@ export async function run(): Promise<void> {
   }
 }
 
-/** True when this file was started directly, rather than imported. */
-function isEntryPoint(): boolean {
-  const entry = process.argv[1];
-  if (!entry) return false;
-  try {
-    return import.meta.url === new URL(`file://${entry.replace(/\\/g, '/')}`).href || import.meta.url.endsWith(entry.replace(/\\/g, '/'));
-  } catch {
-    return false;
-  }
-}
 
-if (isEntryPoint()) {
+if (isEntryPoint(import.meta.url)) {
   void run();
 }

@@ -101,6 +101,7 @@ jobs:
       # The subject states the verification level, so a run that produced an unverified
       # solution is not reported as a success.
       - name: Send result email
+        id: result_mail
         if: success() && steps.mail.outputs.configured == 'true'
         uses: dawidd6/action-send-mail@v3
         with:
@@ -118,6 +119,7 @@ jobs:
       # the test suite, not only the solver. The solver writes email_failure.html naming
       # the component that failed; when it never got that far, the plain body is used.
       - name: Send failure email
+        id: failure_mail
         if: failure() && steps.mail.outputs.configured == 'true'
         uses: dawidd6/action-send-mail@v3
         with:
@@ -141,13 +143,17 @@ jobs:
             Run log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           html_body: file://leetcode-agent/email_failure.html
 
-      # Writes the notification outcome back to the run's row. Runs after both mail
-      # steps and never fails the job: the solution is already saved and the email has
-      # already been sent or not, independently of this call.
+      # Writes the notification outcome back to the run's row.
+      #
+      # The status is read from the mail steps' OWN outcome, not inferred from the job
+      # status: a run whose solver failed still sends a failure email, and that delivery
+      # succeeding must not be recorded as "failed". Runs after both mail steps and never
+      # fails the job - the solution is already saved and the email has already been sent
+      # or not, independently of this call.
       - name: Record email delivery status
         if: always()
         continue-on-error: true
-        run: node scripts/record-email.ts "${{ steps.mail.outputs.configured == 'true' && (job.status == 'success' && 'sent' || 'failed') || 'skipped' }}"
+        run: node scripts/record-email.ts "${{ steps.mail.outputs.configured != 'true' && 'skipped' || (steps.result_mail.outcome == 'success' || steps.failure_mail.outcome == 'success') && 'sent' || (steps.result_mail.outcome == 'failure' || steps.failure_mail.outcome == 'failure') && 'failed' || 'skipped' }}"
         working-directory: leetcode-agent
         env:
           EXECUTION_ID: ${{ steps.solver.outputs.EXECUTION_ID }}

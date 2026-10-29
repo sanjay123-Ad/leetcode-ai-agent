@@ -12,6 +12,7 @@
  */
 
 import { executionId, updateEmailStatus, type EmailStatus } from '../src/lib/persistence.ts';
+import { isEntryPoint } from './entry-point.ts';
 
 const VALID: EmailStatus[] = ['sent', 'failed', 'skipped', 'pending'];
 
@@ -46,11 +47,7 @@ export async function run(argv: string[] = process.argv.slice(2)): Promise<numbe
   return 0;
 }
 
-function isEntryPoint(): boolean {
-  const entry = process.argv[1];
-  return Boolean(entry && import.meta.url.endsWith(entry.replace(/\\/g, '/')));
-}
 
-if (isEntryPoint()) {
+if (isEntryPoint(import.meta.url)) {
   process.exitCode = await run();
 }

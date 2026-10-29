@@ -28,6 +28,7 @@
 import { htmlToText, decodeEntities } from '../src/lib/html.ts';
 import { saveRun, type AgentRunRecord } from '../src/lib/persistence.ts';
 import { configStatus } from '../src/lib/config.ts';
+import { isEntryPoint } from './entry-point.ts';
 
 export type RecoveredRun = {
   date?: string;
@@ -189,11 +190,7 @@ export async function run(argv: string[] = process.argv.slice(2)): Promise<numbe
   return saved === runs.length ? 0 : 1;
 }
 
-function isEntryPoint(): boolean {
-  const entry = process.argv[1];
-  return Boolean(entry && import.meta.url.endsWith(entry.replace(/\\/g, '/')));
-}
 
-if (isEntryPoint()) {
+if (isEntryPoint(import.meta.url)) {
   process.exitCode = await run();
 }
