@@ -1,238 +1,162 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenAI } from '@google/genai';
-import { supabase } from '@/lib/supabase';
+import { solveProblem, type SolveOutput } from '@/lib/pipeline.ts';
+import { resolveProblem, type ProblemRequest } from '@/lib/problem-input.ts';
+import { persistRun } from '@/lib/persistence.ts';
+import { configStatus } from '@/lib/config.ts';
+import type { LogEntry } from '@/lib/log.ts';
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// The pipeline makes several model calls plus a compile-and-run step; the measured
+// end-to-end time is tens of seconds, which needs an explicit limit on serverless hosts.
+export const maxDuration = 300;
 
-// Helper: Analyze problem
-async function analyzeProblem(problemText: string) {
-  const prompt = `
-Analyze this LeetCode problem.
-Extract core task, expected time and space complexity, and edge cases.
-Format as strict JSON:
-{
-  "task": "summary",
-  "expectedTimeComplexity": "O(...)",
-  "expectedSpaceComplexity": "O(...)",
-  "edgeCases": ["case1"],
-  "insights": ["insight1"]
-}
-
-Problem Description:
-${problemText}
-  `;
-
-  const response = await ai.models.generateContent({
-    model: 'gemini-3.5-flash-lite',
-    contents: prompt,
-    config: {
-      responseMimeType: 'application/json',
-      maxOutputTokens: 500,
-    }
-  });
-
-  const text = response.text;
-  if (!text) throw new Error('No analysis response from Gemini');
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  return JSON.parse(jsonMatch?.[0] || text);
-}
-
-// Helper: Generate Java code
-async function generateCode(problemText: string, analysis: any) {
-  const prompt = `
-Write an optimal LeetCode Java solution (class Solution) for this problem.
-Provide ONLY the Java code (class Solution). Do NOT include markdown code blocks or explanations.
-
-Problem: ${problemText}
-Analysis: ${JSON.stringify(analysis)}
-  `;
-
-  const response = await ai.models.generateContent({
-    model: 'gemini-3.5-flash-lite',
-    contents: prompt,
-    config: {
-      maxOutputTokens: 1000,
-    }
-  });
-
-  let code = response.text;
-  if (!code) throw new Error('No code response from Gemini');
-  return code.replace(/```java/gi, '').replace(/```/g, '').trim();
-}
-
-// Helper: Generate test wrapper and execute via Judge0
-async function testCode(problemText: string, code: string) {
-  const prompt = `
-Write a runnable Java class named "Main" that tests the following solution against 3 test cases.
-Print EXACTLY "ALL_TESTS_PASSED" if all pass. Print EXACTLY "TEST_FAILED" if any fail.
-Return ONLY raw Java code containing Main and Solution classes, no markdown.
-
-Problem: ${problemText}
-Solution: ${code}
-  `;
-
-  const response = await ai.models.generateContent({
-    model: 'gemini-3.5-flash-lite',
-    contents: prompt,
-    config: {
-      maxOutputTokens: 1200,
-    }
-  });
-
-  let testCode = response.text;
-  if (!testCode) throw new Error('No test code response from Gemini');
-  testCode = testCode.replace(/```java/gi, '').replace(/```/g, '').trim();
-
-  const judge0Response = await fetch('https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&wait=true', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-RapidAPI-Key': process.env.JUDGE0_API_KEY || '',
-      'X-RapidAPI-Host': 'judge0-ce.p.rapidapi.com'
-    },
-    body: JSON.stringify({
-      language_id: 62,
-      source_code: testCode,
-    })
-  });
-
-  const executionResult = await judge0Response.json();
-  return { testCode, execution: executionResult };
-}
-
-// Helper: Debug failed code
-async function debugCode(problemText: string, code: string, errorOutput: string) {
-  const prompt = `
-Fix this Java "class Solution" for the LeetCode problem. The tests failed with error:
-${errorOutput}
-
-Problem: ${problemText}
-Current Code: ${code}
-
-Provide ONLY the corrected "class Solution" code without markdown or main method.
-  `;
-
-  const response = await ai.models.generateContent({
-    model: 'gemini-3.5-flash-lite',
-    contents: prompt,
-    config: {
-      maxOutputTokens: 1000,
-    }
-  });
-
-  let fixedCode = response.text;
-  if (!fixedCode) throw new Error('No debug response from Gemini');
-  return fixedCode.replace(/```java/gi, '').replace(/```/g, '').trim();
-}
-
+/**
+ * Runs the full solve pipeline for one problem.
+ *
+ * Accepts `{ titleSlug }` or `{ url }` (authoritative: the official interface, examples and
+ * constraints come from LeetCode) and still accepts the original `{ problemText }` /
+ * `{ problem: { content } }` bodies. Pass `?stream=1` to receive newline-delimited progress
+ * events while the pipeline runs, instead of waiting for the final JSON.
+ */
 export async function POST(req: Request) {
-  const logs: string[] = [];
-  const addLog = (msg: string) => {
-    console.log(msg);
-    logs.push(msg);
-  };
+  const { searchParams } = new URL(req.url);
+  const wantsStream = searchParams.get('stream') === '1';
 
+  let body: ProblemRequest;
   try {
-    const body = await req.json();
-    const problemText = body.problemText || body.problem?.content;
-    const title = body.challengeInfo?.title || body.problem?.title || 'Daily Problem';
-    const difficulty = body.challengeInfo?.difficulty || body.problem?.difficulty || 'Medium';
-
-    if (!problemText) {
-      return NextResponse.json({ error: 'Valid problem content is required' }, { status: 400 });
-    }
-
-    addLog(`🚀 Starting Autonomous Solve pipeline for: "${title}"`);
-
-    // Step 1: Analyze
-    addLog('🧠 Phase 1: AI Analyzing problem statement & constraints...');
-    const analysis = await analyzeProblem(problemText);
-    addLog(`✅ Analysis complete! Target Time: ${analysis.expectedTimeComplexity}, Space: ${analysis.expectedSpaceComplexity}`);
-
-    // Step 2: Generate Initial Code
-    addLog('💻 Phase 2: Generating optimal Java solution...');
-    let currentCode = await generateCode(problemText, analysis);
-    addLog('✅ Initial Java code generated.');
-
-    // Step 3: Self-Healing Testing Loop (Up to 3 Attempts)
-    let passed = false;
-    let attempts = 0;
-    let lastExecutionResult: any = null;
-
-    for (let i = 1; i <= 3; i++) {
-      attempts = i;
-      addLog(`🧪 Phase 3 (Attempt ${i}/3): Generating unit tests & compiling on Judge0...`);
-
-      const { execution } = await testCode(problemText, currentCode);
-      lastExecutionResult = execution;
-
-      const stdout = execution.stdout || '';
-      const stderr = execution.stderr || '';
-      const compileOutput = execution.compile_output || '';
-
-      if (stdout.includes('ALL_TESTS_PASSED') && execution.status?.id === 3) {
-        passed = true;
-        addLog(`🎉 SUCCESS! All test cases passed on Attempt ${i}!`);
-        break;
-      } else {
-        addLog(`❌ Attempt ${i} Failed.`);
-        if (stderr) addLog(`Stderr: ${stderr.trim()}`);
-        if (compileOutput) addLog(`Compilation Error: ${compileOutput.trim()}`);
-        if (stdout) addLog(`Stdout: ${stdout.trim()}`);
-
-        if (i < 3) {
-          addLog(`🔧 Self-Healing: Triggering AI Debugger to fix code...`);
-          const errorContext = `stdout: ${stdout}\nstderr: ${stderr}\ncompile_output: ${compileOutput}`;
-          currentCode = await debugCode(problemText, currentCode, errorContext);
-          addLog(`✅ AI Debugger refactored code. Retrying...`);
-        }
-      }
-    }
-
-    // Clean code before saving
-    const finalCode = currentCode.replace(/```java/gi, '').replace(/```/g, '').trim();
-
-    // Step 4: Save Result to Supabase Database
-    addLog('💾 Phase 4: Saving solution record to Supabase database...');
-    const { data: dbData, error: dbError } = await supabase
-      .from('problem_history')
-      .insert([
-        {
-          title,
-          difficulty,
-          code: finalCode,
-          attempts,
-          passed,
-        }
-      ])
-      .select();
-
-    if (dbError) {
-      addLog(`⚠️ Supabase Warning: ${dbError.message}`);
-    } else {
-      addLog(`✅ Successfully saved to Supabase! Record ID: ${dbData?.[0]?.id}`);
-    }
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        analysis,
-        finalCode,
-        allPassed: passed,
-        attempts,
-        execution: lastExecutionResult,
-        logs,
-        steps: [
-          { step: 'analyze', status: 'done' },
-          { step: 'generate', status: 'done' },
-          { step: `test_attempt_${attempts}`, status: passed ? 'passed' : 'failed' },
-        ],
-      }
-    });
-
-  } catch (error: any) {
-    console.error('Error in auto-solve pipeline:', error);
-    addLog(`💥 Pipeline Error: ${error.message}`);
-    return NextResponse.json({ success: false, error: error.message, logs }, { status: 500 });
+    body = (await req.json()) as ProblemRequest;
+  } catch {
+    return NextResponse.json({ success: false, error: 'Request body must be JSON.' }, { status: 400 });
   }
+
+  if (!configStatus().gemini) {
+    return NextResponse.json(
+      { success: false, error: 'GEMINI_API_KEY is not configured. Add it to .env.local and restart the server.' },
+      { status: 503 },
+    );
+  }
+
+  const resolved = await resolveProblem(body);
+  if (!resolved) {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          'Provide a LeetCode problem: `titleSlug`, `url`, or `problemText`. A slug or URL is strongly preferred, because only LeetCode supplies the official Java interface.',
+      },
+      { status: 400 },
+    );
+  }
+
+  if (!wantsStream) {
+    try {
+      const result = await solveProblem(resolved.problem, { signal: req.signal });
+      const persistence = await persistRun(result);
+      return NextResponse.json({ success: true, data: shapeResponse({ ...result, persistence }, resolved.resolvedBy) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Auto-solve failed';
+      console.error('[auto-solve]', message);
+      return NextResponse.json({ success: false, error: message }, { status: 500 });
+    }
+  }
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (payload: unknown) => {
+        try {
+          controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
+        } catch {
+          // The client went away; the pipeline's own abort signal will stop the work.
+        }
+      };
+
+      send({ type: 'problem', data: { title: resolved.problem.title, difficulty: resolved.problem.difficulty, titleSlug: resolved.problem.titleSlug } });
+
+      try {
+        const result = await solveProblem(resolved.problem, {
+          signal: req.signal,
+          onEvent: (entry: LogEntry) => send({ type: 'event', data: entry }),
+        });
+        const persistence = await persistRun(result);
+        send({ type: 'result', data: shapeResponse({ ...result, persistence }, resolved.resolvedBy) });
+      } catch (error) {
+        send({ type: 'error', error: error instanceof Error ? error.message : 'Auto-solve failed' });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'application/x-ndjson; charset=utf-8',
+      'Cache-Control': 'no-store, no-transform',
+      'X-Accel-Buffering': 'no',
+    },
+  });
+}
+
+/**
+ * Keeps the fields the previous API returned (so the existing client contract holds) and
+ * adds the verification ladder.
+ */
+function shapeResponse(result: SolveOutput, resolvedBy: 'slug' | 'text') {
+  const lastExecution = [...result.attempts].reverse().find((a) => a.execution)?.execution;
+
+  return {
+    // --- original shape ---
+    analysis: result.analysis,
+    finalCode: result.finalCode,
+    allPassed: result.checks.exampleTestsPassed,
+    attempts: result.attempts.length,
+    execution: lastExecution,
+    logs: result.logs,
+    steps: result.attempts.map((attempt) => ({
+      step: `attempt_${attempt.attempt}`,
+      status: attempt.status === 'example_tests_passed' || attempt.status === 'additional_tests_passed' ? 'passed' : 'failed',
+    })),
+
+    // --- verification ladder, reported honestly ---
+    status: result.status,
+    statusDetail: result.statusDetail,
+    checks: result.checks,
+    submissionReady: result.submissionReady,
+    readinessReason: result.readinessReason,
+
+    // --- provenance and explanation ---
+    problem: {
+      title: result.problem.title,
+      titleSlug: result.problem.titleSlug,
+      difficulty: result.problem.difficulty,
+      questionFrontendId: result.problem.questionFrontendId,
+      link: result.problem.link,
+      tags: result.problem.topicTags,
+      constraints: result.problem.constraints,
+      javaSnippet: result.problem.javaSnippet,
+      exampleTestcases: result.problem.exampleTestcases,
+      exampleOutputs: result.problem.exampleOutputs,
+      provenance: result.problem.provenance,
+    },
+    contract: result.contract,
+    explanation: result.explanation,
+    resolvedBy,
+    attemptDetails: result.attempts.map((attempt) => ({
+      attempt: attempt.attempt,
+      status: attempt.status,
+      signatureValid: attempt.signature.valid,
+      violations: attempt.signature.violations,
+      execution: attempt.execution
+        ? {
+            kind: attempt.execution.kind,
+            runner: attempt.execution.runner,
+            message: attempt.execution.message,
+            cases: attempt.execution.cases,
+          }
+        : undefined,
+      repairReason: attempt.repairReason,
+    })),
+    events: result.events,
+    usage: result.usage,
+    persistence: result.persistence,
+  };
 }

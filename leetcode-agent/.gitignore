@@ -32,6 +32,14 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...but the template carries no secrets and should be committed
+!.env.example
+
+# local run history and generated email body
+history.json
+email_success.html
+email_failure.html
+bench-results.json
 
 # vercel
 .vercel

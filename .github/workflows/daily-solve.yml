@@ -1,43 +1,99 @@
 name: 🤖 Daily LeetCode AI Solver
 
 on:
-  # Run every day at 2:30 AM UTC = 8:00 AM IST
+  # Every day at 2:30 AM UTC = 8:00 AM IST
   schedule:
     - cron: '30 2 * * *'
-  
-  # Also allow manual trigger from GitHub UI
+
+  # Also allow a manual trigger from the GitHub UI
   workflow_dispatch:
+    inputs:
+      slug:
+        description: "Optional problem slug to solve instead of today's daily challenge"
+        required: false
+        type: string
 
 jobs:
   solve-daily-challenge:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Node 24 runs the TypeScript pipeline directly (native type stripping), so the CLI
+      # and the web app share one implementation with no build step.
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
+
+      # A JDK on the runner lets the agent compile and run the generated solution locally,
+      # which is free and keeps the Judge0 free-tier allowance for the web app.
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
+        working-directory: leetcode-agent
+
+      - name: Lint
+        run: npm run lint
+        working-directory: leetcode-agent
+
+      - name: Unit tests
+        run: npm test
         working-directory: leetcode-agent
 
       - name: Run AI LeetCode Solver
         id: solver
-        run: node standalone-solver.mjs
+        run: node scripts/daily-solve.ts ${{ inputs.slug }}
         working-directory: leetcode-agent
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          # Optional: only used if no JDK is available on the runner.
           JUDGE0_API_KEY: ${{ secrets.JUDGE0_API_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
 
-      - name: Send Success Email
-        if: success()
+      - name: Upload run history
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: solve-history
+          path: |
+            leetcode-agent/history.json
+            leetcode-agent/email_success.html
+            leetcode-agent/email_failure.html
+          if-no-files-found: ignore
+
+      # Email delivery is unchanged: same SMTP settings and the same recipient as
+      # before. MAIL_TO is an optional override, so no new secret is required. This
+      # gate only skips the mail steps (with a warning) if SMTP credentials are absent,
+      # rather than failing the job.
+      - name: Check email configuration
+        id: mail
+        if: always()
+        env:
+          MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
+          MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+        run: |
+          if [ -n "$MAIL_USERNAME" ] && [ -n "$MAIL_PASSWORD" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Email notifications are disabled: the MAIL_USERNAME and MAIL_PASSWORD repository secrets are not both set."
+          fi
+
+      # The subject states the verification level, so a run that produced an unverified
+      # solution is not reported as a success.
+      - name: Send result email
+        if: success() && steps.mail.outputs.configured == 'true'
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -45,13 +101,16 @@ jobs:
           secure: true
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
-          subject: "✅ SUCCESS: ${{ steps.solver.outputs.PROBLEM_TITLE }}"
-          to: sanjayroyal585858@gmail.com
+          subject: '${{ steps.solver.outputs.SUBJECT_PREFIX }}: ${{ steps.solver.outputs.PROBLEM_ID }}. ${{ steps.solver.outputs.PROBLEM_TITLE }}'
+          to: ${{ secrets.MAIL_TO || 'sanjayroyal585858@gmail.com' }}
           from: GitHub Actions Bot
           html_body: file://leetcode-agent/email_success.html
 
-      - name: Send Failure Email
-        if: failure()
+      # Fires for any failure in the job, including dependency installation, lint and
+      # the test suite, not only the solver. The solver writes email_failure.html naming
+      # the component that failed; when it never got that far, the plain body is used.
+      - name: Send failure email
+        if: failure() && steps.mail.outputs.configured == 'true'
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -59,7 +118,17 @@ jobs:
           secure: true
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
-          subject: "❌ FAILED: LeetCode Daily AI Solver"
-          to: sanjayroyal585858@gmail.com
+          subject: "FAILED (${{ steps.solver.outputs.FAILURE_COMPONENT || 'workflow' }}): LeetCode Daily AI Solver"
+          to: ${{ secrets.MAIL_TO || 'sanjayroyal585858@gmail.com' }}
           from: GitHub Actions Bot
-          body: "Hello Sanjay,\n\nThe AI Agent failed to solve today's LeetCode problem or encountered an error. ⚠️\n\nPlease check the GitHub Actions logs for more details.\n\nBest,\nYour AI Agent"
+          body: |
+            Today's run did not complete.
+
+            Failing component: ${{ steps.solver.outputs.FAILURE_COMPONENT || 'workflow (dependency install, lint or tests)' }}
+            Problem: ${{ steps.solver.outputs.PROBLEM_TITLE || 'not reached' }}
+
+            A solution that fails validation is NOT a failure here: it is still emailed,
+            marked UNVERIFIED. This message means the pipeline itself could not finish.
+
+            Run log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          html_body: file://leetcode-agent/email_failure.html
