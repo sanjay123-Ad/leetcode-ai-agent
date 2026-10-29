@@ -1,48 +1,69 @@
 import { NextResponse } from 'next/server';
-import { evaluateHistoryAccess, HISTORY_COOKIE } from '@/lib/history-auth.ts';
 import { config } from '@/lib/config.ts';
+import { credentialAccepted, mintSession, sessionTtlMs, HISTORY_COOKIE } from '@/lib/history-auth.ts';
 
 export const maxDuration = 15;
 
 /**
- * Unlocks the dashboard's history panel for this browser.
+ * Sign-in and sign-out for the dashboard's history panel.
  *
- *   /api/history/session?token=<HISTORY_API_TOKEN>   → sets the cookie, redirects to /
- *   /api/history/session?logout=1                    → clears it
+ * **POST only.** The token never travels in a URL: query strings are written to server and
+ * proxy access logs, kept in browser history, and leak through the Referer header on any
+ * outbound link. It arrives as form data instead, and what comes back is a signed session
+ * rather than the token itself.
  *
- * The cookie is HttpOnly, so the token is never readable from client JavaScript, and
- * SameSite=Lax so another site cannot cause it to be sent. It is set `secure` whenever the
- * request arrived over HTTPS.
+ *   POST /api/history/session   token=<HISTORY_API_TOKEN>   → sets the session cookie
+ *   POST /api/history/session   intent=logout               → clears it
  *
  * A server component cannot set cookies, which is why this lives in a route handler.
  */
-export async function GET(req: Request) {
-  const url = new URL(req.url);
-  const home = new URL('/', url.origin);
+export async function POST(req: Request) {
+  const home = new URL('/', new URL(req.url).origin);
+  const secure = new URL(req.url).protocol === 'https:' || req.headers.get('x-forwarded-proto') === 'https';
 
-  if (url.searchParams.get('logout') !== null) {
-    const response = NextResponse.redirect(home);
-    response.cookies.delete(HISTORY_COOKIE);
+  let form: FormData;
+  try {
+    form = await req.formData();
+  } catch {
+    return NextResponse.json({ success: false, error: 'Expected a form submission.' }, { status: 400 });
+  }
+
+  if (String(form.get('intent') ?? '') === 'logout') {
+    const response = NextResponse.redirect(home, { status: 303 });
+    response.cookies.set({ name: HISTORY_COOKIE, value: '', httpOnly: true, sameSite: 'lax', secure, path: '/', maxAge: 0 });
     return response;
   }
 
-  const token = url.searchParams.get('token');
-  const access = evaluateHistoryAccess(token);
-
-  if (!access.allowed) {
-    // The reason never echoes the presented value.
-    return NextResponse.json({ success: false, error: access.reason }, { status: access.unconfigured ? 503 : 401 });
+  const token = config.historyApiToken();
+  if (!token) {
+    return NextResponse.json(
+      { success: false, error: 'History access is not configured. Set HISTORY_API_TOKEN to enable it.' },
+      { status: 503 },
+    );
   }
 
-  const response = NextResponse.redirect(home);
+  if (!credentialAccepted(String(form.get('token') ?? ''))) {
+    // The message never echoes what was submitted or expected.
+    return NextResponse.json({ success: false, error: 'Invalid credential.' }, { status: 401 });
+  }
+
+  const response = NextResponse.redirect(home, { status: 303 });
   response.cookies.set({
     name: HISTORY_COOKIE,
-    value: config.historyApiToken() as string,
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: url.protocol === 'https:',
+    value: mintSession(token),
+    httpOnly: true,       // unreadable from client JavaScript
+    sameSite: 'lax',      // not sent on cross-site POSTs
+    secure,               // https only, when the request arrived over https
     path: '/',
-    maxAge: 60 * 60 * 24 * 30,
+    maxAge: Math.floor(sessionTtlMs() / 1000),
   });
   return response;
+}
+
+/** The token must never appear in a URL, so there is no GET sign-in. */
+export async function GET() {
+  return NextResponse.json(
+    { success: false, error: 'Use POST with form data. Credentials must not travel in a URL.' },
+    { status: 405, headers: { Allow: 'POST' } },
+  );
 }
