@@ -396,7 +396,18 @@ export default function AgentConsole({ initialHistory }: { initialHistory: Histo
           </section>
         )}
 
-        {history.entries.length > 0 && <HistoryPanel history={history} />}
+        {history.entries.length > 0 ? (
+          <HistoryPanel history={history} />
+        ) : history.source === 'locked' ? (
+          <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 shadow-xl">
+            <h2 className="text-lg font-semibold mb-1">Recent runs</h2>
+            <p className="text-sm text-neutral-400">{history.detail}</p>
+            <p className="text-xs text-neutral-500 mt-2">
+              Unlock this browser once with{' '}
+              <code className="font-mono text-neutral-400">/api/history/session?token=&lt;HISTORY_API_TOKEN&gt;</code>
+            </p>
+          </div>
+        ) : null}
       </div>
     </div>
   );
