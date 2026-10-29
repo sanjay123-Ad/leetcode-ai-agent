@@ -5,6 +5,9 @@
 
 import type { LogEntry } from './log.ts';
 import type { ProblemAnalysis, SignatureViolation, VerificationStatus } from './types.ts';
+import type { HistoryEntry } from './persistence.ts';
+
+export type { HistoryEntry };
 
 export type ApiEnvelope<T> = { success: true; data: T } | { success: false; error: string };
 
@@ -140,17 +143,7 @@ export type ExecuteResponse = {
 export type HistoryResponse = {
   source: string;
   detail?: string;
-  records: {
-    title: string;
-    titleSlug?: string;
-    difficulty: string;
-    attempts: number;
-    passed: boolean;
-    status?: string;
-    submissionReady?: boolean;
-    solvedAt?: string;
-    created_at?: string;
-  }[];
+  entries: HistoryEntry[];
 };
 
 /** Labels for the verification ladder. Nothing here ever says "Accepted". */

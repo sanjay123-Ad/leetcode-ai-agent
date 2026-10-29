@@ -39,8 +39,31 @@ export const config = {
   judge0ApiKey: () => read('JUDGE0_API_KEY'),
   judge0Host: () => read('JUDGE0_HOST') ?? 'judge0-ce.p.rapidapi.com',
 
-  supabaseUrl: () => read('NEXT_PUBLIC_SUPABASE_URL'),
-  supabaseKey: () => read('SUPABASE_SERVICE_ROLE_KEY') ?? read('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
+  supabaseUrl: () => read('SUPABASE_URL') ?? read('NEXT_PUBLIC_SUPABASE_URL'),
+
+  /**
+   * Server-side key, in order of preference:
+   *   1. SUPABASE_SECRET_KEY        — current convention (`sb_secret_…`)
+   *   2. SUPABASE_SERVICE_ROLE_KEY  — legacy service-role JWT
+   *
+   * Both bypass RLS, so both must stay server-side. The publishable/anon key is
+   * deliberately NOT a fallback here: `agent_runs` denies it by design, so falling back
+   * would turn a configuration mistake into a silent permission error.
+   */
+  supabaseSecretKey: () => read('SUPABASE_SECRET_KEY') ?? read('SUPABASE_SERVICE_ROLE_KEY'),
+
+  /** Publishable key. Only used for the legacy `problem_history` path. */
+  supabasePublishableKey: () =>
+    read('SUPABASE_PUBLISHABLE_KEY') ?? read('NEXT_PUBLIC_SUPABASE_ANON_KEY') ?? read('SUPABASE_ANON_KEY'),
+
+  /** Whichever key is available, preferring the privileged one. */
+  supabaseKey: () => config.supabaseSecretKey() ?? config.supabasePublishableKey(),
+
+  /**
+   * Bearer token required by the history endpoint. When it is unset the endpoint denies
+   * every request: private solution history is never served unauthenticated.
+   */
+  historyApiToken: () => read('HISTORY_API_TOKEN'),
 
   cronSecret: () => read('CRON_SECRET'),
 
@@ -57,7 +80,10 @@ export function configStatus() {
   return {
     gemini: Boolean(read('GEMINI_API_KEY')),
     judge0: Boolean(read('JUDGE0_API_KEY')),
-    supabase: Boolean(read('NEXT_PUBLIC_SUPABASE_URL')) && Boolean(config.supabaseKey()),
+    supabase: Boolean(config.supabaseUrl()) && Boolean(config.supabaseKey()),
+    /** True when the privileged key is present, i.e. `agent_runs` is writable. */
+    supabaseWritable: Boolean(config.supabaseUrl()) && Boolean(config.supabaseSecretKey()),
+    historyAuth: Boolean(config.historyApiToken()),
     model: config.geminiModel(),
   };
 }
