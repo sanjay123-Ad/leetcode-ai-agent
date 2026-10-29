@@ -212,6 +212,25 @@ async function reportFailure(error: unknown) {
 
   console.error(`[daily] FAILED in ${component}: ${safeMessage}`);
 
+  // Record the failure too, so a day the pipeline fell over is visible in the history
+  // rather than being an unexplained gap. The message has already been through redact().
+  // This is best-effort: it must not interfere with the failure email.
+  const id = currentExecutionId ?? executionId(knownProblem?.titleSlug);
+  const stored = await saveRun({
+    execution_id: id,
+    source: process.env.GITHUB_RUN_ID ? 'github-actions' : 'cli',
+    title: title || 'Unknown problem',
+    title_slug: knownProblem?.titleSlug,
+    difficulty: knownProblem?.difficulty,
+    question_id: knownProblem?.questionFrontendId,
+    verification_status: 'failed',
+    failure_component: component,
+    failure_message: safeMessage.slice(0, 2000),
+    gh_run_id: process.env.GITHUB_RUN_ID,
+    email_status: 'pending',
+  });
+  console.log(`[daily] database: ${stored.ok ? stored.detail : `NOT SAVED - ${stored.detail}`}`);
+
   try {
     const fs = await import('node:fs/promises');
 
@@ -246,7 +265,7 @@ async function reportFailure(error: unknown) {
           // GITHUB_OUTPUT is line-based, so the message must stay on one line.
           `FAILURE_MESSAGE=${safeMessage.replace(/[\r\n]+/g, ' ').slice(0, 400)}`,
           `PROBLEM_TITLE=${title}`,
-          `EXECUTION_ID=${currentExecutionId ?? ''}`,
+          `EXECUTION_ID=${id}`,
           '',
         ].join('\n'),
       );

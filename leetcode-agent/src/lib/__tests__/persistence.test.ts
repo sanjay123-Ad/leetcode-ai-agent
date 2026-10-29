@@ -444,3 +444,44 @@ describe('parked records on disk', () => {
     expect(parsed.verification_status).toBe('example_tests_passed');
   });
 });
+
+describe('failure rows', () => {
+  it('records the failing component and a redacted message', async () => {
+    const calls = mockFetch([201]);
+    const result = await saveRun({
+      execution_id: 'gha-fail-1',
+      source: 'github-actions',
+      title: 'Unknown problem',
+      verification_status: 'failed',
+      failure_component: 'Gemini',
+      failure_message: 'Gemini 503: overloaded',
+      email_status: 'pending',
+    });
+
+    expect(result.ok).toBe(true);
+    const [row] = calls[0].body as Record<string, unknown>[];
+    expect(row).toMatchObject({
+      verification_status: 'failed',
+      failure_component: 'Gemini',
+      failure_message: 'Gemini 503: overloaded',
+    });
+    // A failed run has no solution to store, and none must be invented.
+    expect(row.solution_code).toBeUndefined();
+  });
+
+  it('parks a failure row too, so a bad day is not an unexplained gap', async () => {
+    mockFetch([new TypeError('fetch failed')]);
+    const result = await saveRun({
+      execution_id: 'gha-fail-2',
+      source: 'github-actions',
+      title: 'Unknown problem',
+      verification_status: 'failed',
+      failure_component: 'LeetCode API',
+      email_status: 'pending',
+    });
+
+    expect(result.ok).toBe(false);
+    const parked = await readPendingRecords();
+    expect(parked[0].record.failure_component).toBe('LeetCode API');
+  });
+});
