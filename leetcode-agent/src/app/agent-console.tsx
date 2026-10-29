@@ -396,7 +396,11 @@ export default function AgentConsole({ initialHistory }: { initialHistory: Histo
           </section>
         )}
 
-        {history.entries.length > 0 && <HistoryPanel history={history} />}
+        {history.entries.length > 0 ? (
+          <HistoryPanel history={history} />
+        ) : history.source === 'locked' ? (
+          <HistoryLocked detail={history.detail ?? 'History is locked.'} />
+        ) : null}
       </div>
     </div>
   );
@@ -791,9 +795,17 @@ function HistoryPanel({ history }: { history: HistoryResponse }) {
     <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 shadow-xl space-y-3">
       <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
         <h2 className="text-lg font-semibold">Recent runs</h2>
-        <span className="text-xs text-neutral-500">
-          source: {history.source}
-          {history.detail ? ` — ${history.detail}` : ''}
+        <span className="flex items-center gap-3 text-xs text-neutral-500">
+          <span>
+            source: {history.source}
+            {history.detail ? ` — ${history.detail}` : ''}
+          </span>
+          <form method="POST" action="/api/history/session">
+            <input type="hidden" name="intent" value="logout" />
+            <button type="submit" className="text-neutral-400 hover:text-neutral-200 underline">
+              sign out
+            </button>
+          </form>
         </span>
       </div>
 
@@ -850,6 +862,33 @@ function HistoryPanel({ history }: { history: HistoryResponse }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function HistoryLocked({ detail }: { detail: string }) {
+  return (
+    <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 shadow-xl space-y-3">
+      <h2 className="text-lg font-semibold">Recent runs</h2>
+      <p className="text-sm text-neutral-400">{detail}</p>
+
+      {/* POST, not a link: a token in a URL reaches access logs, browser history
+          and the Referer header. */}
+      <form method="POST" action="/api/history/session" className="flex gap-2 max-w-md">
+        <input
+          type="password"
+          name="token"
+          autoComplete="current-password"
+          placeholder="HISTORY_API_TOKEN"
+          className="flex-1 bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-blue-500"
+        />
+        <button
+          type="submit"
+          className="px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+        >
+          Unlock
+        </button>
+      </form>
     </div>
   );
 }
