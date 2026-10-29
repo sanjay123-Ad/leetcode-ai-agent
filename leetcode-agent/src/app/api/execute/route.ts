@@ -1,56 +1,95 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenAI } from '@google/genai';
+import { buildContract, validateSignature } from '@/lib/java/contract.ts';
+import { buildCompileOnlyHarness, buildHarness } from '@/lib/java/harness.ts';
+import { runJava } from '@/lib/runner/index.ts';
+import { resolveProblem, type ProblemRequest } from '@/lib/problem-input.ts';
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+export const maxDuration = 120;
 
+type ExecuteRequest = ProblemRequest & { code?: string };
+
+/**
+ * Compiles and runs a solution against LeetCode's own example cases.
+ *
+ * The harness is generated here, from the official examples — the model is not involved,
+ * so "tests passed" means the solution reproduced LeetCode's published outputs. The
+ * response distinguishes a compile error, a wrong answer, a crash and an infrastructure
+ * failure instead of reporting one undifferentiated failure.
+ */
 export async function POST(req: Request) {
   try {
-    const { problemText, code } = await req.json();
+    const body = (await req.json()) as ExecuteRequest;
+    const code = body.code?.trim();
 
-    if (!problemText || !code) {
-      return NextResponse.json({ error: 'problemText and code are required' }, { status: 400 });
+    if (!code) {
+      return NextResponse.json({ success: false, error: 'code is required' }, { status: 400 });
     }
 
-    const prompt = `
-Given this LeetCode problem and Solution class, generate a single Java harness class named "Main" that instantiates Solution and tests it against 3 test cases.
-Print EXACTLY "ALL_TESTS_PASSED" if all pass. Print EXACTLY "TEST_FAILED" if any fail.
-Return ONLY raw Java code containing Main and Solution classes.
+    const resolved = await resolveProblem(body, req.signal);
+    if (!resolved) {
+      return NextResponse.json(
+        { success: false, error: 'problemText, titleSlug or url is required' },
+        { status: 400 },
+      );
+    }
 
-Problem: ${problemText}
-Solution: ${code}
-    `;
+    const { problem } = resolved;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash-lite',
-      contents: prompt,
-      config: {
-        maxOutputTokens: 1200,
-      }
-    });
+    if (!problem.javaSnippet) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'Without the official Java template this endpoint cannot build a trustworthy harness. Pass `titleSlug` or `url` to verify against LeetCode\'s real examples.',
+        },
+        { status: 422 },
+      );
+    }
 
-    let testCode = response.text;
-    if (!testCode) throw new Error("No response from Gemini");
+    const contract = buildContract(problem.javaSnippet, problem.metaData);
+    const signature = validateSignature(code, contract);
 
-    testCode = testCode.replace(/```java/gi, '').replace(/```/g, '').trim();
+    // Signature validation is free; running code that LeetCode would reject wastes quota.
+    if (!signature.valid) {
+      return NextResponse.json({
+        success: true,
+        data: {
+          signature,
+          executed: false,
+          verification: 'signature_invalid',
+          reason: 'The code does not match the official interface, so it was not executed.',
+        },
+      });
+    }
 
-    // Execute via Judge0
-    const judge0Response = await fetch('https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&wait=true', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-RapidAPI-Key': process.env.JUDGE0_API_KEY || '',
-        'X-RapidAPI-Host': 'judge0-ce.p.rapidapi.com'
+    const harness = buildHarness(problem, contract, code);
+    const source = harness.supported ? harness.source : buildCompileOnlyHarness(contract, code);
+    const outcome = await runJava({ source, signal: req.signal });
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        signature,
+        executed: true,
+        compileOnly: !harness.supported,
+        harnessReason: harness.supported ? undefined : harness.reason,
+        verifiableCases: harness.supported ? harness.verifiableCases : 0,
+        extraChecks: harness.supported ? harness.extraChecks : [],
+        verification: harness.supported
+          ? outcome.kind === 'passed'
+            ? 'example_tests_passed'
+            : outcome.kind
+          : outcome.kind === 'passed'
+            ? 'compiled'
+            : outcome.kind,
+        execution: outcome,
+        // Kept for compatibility with the original response shape.
+        testCode: source,
       },
-      body: JSON.stringify({
-        language_id: 62, // Java
-        source_code: testCode,
-      })
     });
-
-    const execution = await judge0Response.json();
-    return NextResponse.json({ success: true, data: { testCode, execution } });
-  } catch (error: any) {
-    console.error('Error executing code:', error);
-    return NextResponse.json({ success: false, error: error.message || 'Failed to execute' }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to execute';
+    console.error('[execute]', message);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
