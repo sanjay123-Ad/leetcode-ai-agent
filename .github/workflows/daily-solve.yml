@@ -58,6 +58,13 @@ jobs:
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
           # Optional: only used if no JDK is available on the runner.
           JUDGE0_API_KEY: ${{ secrets.JUDGE0_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          # Server-side key: required to write agent_runs, which denies the publishable
+          # key by design. The run still completes and emails without it - the save is
+          # reported as failed and the record is parked as an artifact for replay.
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # Kept for backwards compatibility with the legacy problem_history reader.
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
 
@@ -70,6 +77,7 @@ jobs:
             leetcode-agent/history.json
             leetcode-agent/email_success.html
             leetcode-agent/email_failure.html
+            leetcode-agent/pending-persist/
           if-no-files-found: ignore
 
       # Email delivery is unchanged: same SMTP settings and the same recipient as
@@ -132,3 +140,17 @@ jobs:
 
             Run log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           html_body: file://leetcode-agent/email_failure.html
+
+      # Writes the notification outcome back to the run's row. Runs after both mail
+      # steps and never fails the job: the solution is already saved and the email has
+      # already been sent or not, independently of this call.
+      - name: Record email delivery status
+        if: always()
+        continue-on-error: true
+        run: node scripts/record-email.ts "${{ steps.mail.outputs.configured == 'true' && (job.status == 'success' && 'sent' || 'failed') || 'skipped' }}"
+        working-directory: leetcode-agent
+        env:
+          EXECUTION_ID: ${{ steps.solver.outputs.EXECUTION_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

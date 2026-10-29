@@ -46,8 +46,19 @@ back to [Judge0 on RapidAPI](https://rapidapi.com/judge0-official/api/judge0-ce)
 `JUDGE0_API_KEY` is set. With neither, solutions are still signature-checked, and the run is
 reported as `signature_valid` rather than verified.
 
-Run history is optional: Supabase if configured and reachable, otherwise a local
-`history.json`, otherwise nothing. A failure to persist never fails a run.
+**Run history (optional).** Every execution is saved to Supabase as one row in
+`agent_runs`, keyed by a stable `execution_id` so retries update rather than duplicate.
+Writes need a server-side key (`SUPABASE_SECRET_KEY`, or the legacy
+`SUPABASE_SERVICE_ROLE_KEY`): the table has RLS enabled with no policies, so the
+publishable key is denied by design and never has to be trusted.
+
+Saving and emailing are independent. The save happens first, the email goes out
+regardless, and the delivery outcome is written back afterwards by `scripts/record-email.ts`.
+If Supabase is unreachable the record is parked in `pending-persist/`, uploaded as a run
+artifact, and the failure is reported in the log, the workflow summary and the email — it
+is never reported as a success. Replay it later with `npm run replay-persistence`.
+
+Apply `supabase/migrations/0001_agent_runs.sql` before the first run that should be saved.
 
 ## Commands
 
@@ -58,6 +69,9 @@ npm test           # 170 deterministic unit tests, no network and no API keys ne
 npm run lint       # eslint
 npm run daily      # solve today's daily challenge from the CLI
 npm run bench      # regression benchmark (see below)
+
+npm run replay-persistence   # push records that a failed save parked on disk
+npm run recover-history      # rebuild rows from old workflow logs or saved emails
 ```
 
 `npm run daily` also accepts a slug: `node scripts/daily-solve.ts two-sum`.
@@ -125,7 +139,7 @@ repository *variable*.
 | `POST /api/generate` | Generation step only; returns the code plus its signature validation |
 | `POST /api/execute` | Compiles and runs a solution against the official examples |
 | `GET /api/cron` | Scheduled daily run. Send the secret as `Authorization: Bearer <CRON_SECRET>` |
-| `GET /api/history` | Recent runs |
+| `GET /api/history` | Recent runs. **Deny by default**: requires `Authorization: Bearer $HISTORY_API_TOKEN`, and serves nobody while that is unset. The dashboard does not use it — its panel is server-rendered, so no key or token reaches the browser |
 
 Every response keeps the fields the previous version returned, so existing callers continue
 to work; the verification fields are additions.

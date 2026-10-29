@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { LogEntry } from '@/lib/log.ts';
 import {
   STATUS_LABELS,
@@ -64,15 +65,16 @@ export default function AgentConsole({ initialHistory }: { initialHistory: Histo
   const [loadingTest, setLoadingTest] = useState(false);
 
   /* ---------------- history ---------------- */
-  const [history, setHistory] = useState<HistoryResponse>(initialHistory);
+  // Rendered by the server component, which reads the database directly. Refreshing the
+  // route re-runs that read on the server, so neither the Supabase key nor the history
+  // token is ever sent to the browser - and /api/history stays available only to
+  // authenticated callers.
+  const router = useRouter();
+  const history = initialHistory;
 
-  const loadHistory = useCallback(async () => {
-    try {
-      setHistory(await getJson<HistoryResponse>('/api/history?limit=10'));
-    } catch {
-      // History is a convenience panel; a failure here must not disturb the page.
-    }
-  }, []);
+  const refreshHistory = useCallback(() => {
+    router.refresh();
+  }, [router]);
 
   const runSolve = async (target: { titleSlug?: string; url?: string }) => {
     setAutoLoading(true);
@@ -114,7 +116,7 @@ export default function AgentConsole({ initialHistory }: { initialHistory: Histo
           else if (message.type === 'error') setError(message.error);
         }
       }
-      await loadHistory();
+      refreshHistory();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Auto-solve failed');
     } finally {

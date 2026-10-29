@@ -108,6 +108,8 @@ function githubRunUrl(): string | undefined {
 export type BuildOptions = {
   source?: string;
   executionId?: string;
+  /** The generation model, which the solve result itself does not carry. */
+  model?: string;
   emailStatus?: EmailStatus;
   failure?: { component: string; message: string };
   recoveryNote?: string;
@@ -149,7 +151,7 @@ export function buildRunRecord(result: SolveResult, options: BuildOptions = {}):
     attempts: result.attempts.length,
     repairs: Math.max(0, result.attempts.length - 1),
 
-    model: (result as SolveResult & { model?: string }).model,
+    model: options.model ?? (result as SolveResult & { model?: string }).model,
     prompt_tokens: result.usage.promptTokens,
     output_tokens: result.usage.outputTokens,
     judge0_submissions: result.usage.judge0Submissions,
