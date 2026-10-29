@@ -13,3 +13,10 @@ Desktop.ini
 
 # Batch files with secrets (optional)
 run-daily-agent.bat
+
+# Editor/agent tooling, local only
+.claude/
+
+# Unrelated projects that live in this folder but are NOT part of the agent
+zol-logo-reveal/
+logo-reveal.html
